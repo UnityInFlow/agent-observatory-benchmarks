@@ -2,4 +2,16 @@ target/
 *.log
 evaluation*.json
 run*.json
+
+# Ambient tooling artifacts. Background daemons, editors and indexers on a developer's
+# machine write into whatever directory they are pointed at — including a benchmark
+# worktree. Anything matched here is environment noise, not agent output, and must never
+# be counted as a scope violation by the evaluator.
 .DS_Store
+.memdb/
+.idea/
+.vscode/
+*.pid
+*.swp
+.claude/
+.copilot/
