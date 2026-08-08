@@ -1,0 +1,46 @@
+id: BE-002
+name: order-amount-validation
+category: bugfix
+prompt_file: task.md
+repository: sample-service
+evaluator: evaluator.sh
+evaluator_version: 1.0.0
+# Why this benchmark exists: BE-001 never failed, so it could not tell whether a
+# customization helped. Here the obvious solution (`@Positive` + `@Valid`) produces the
+# right status code through Spring's default error handling, which does not use this
+# service's error envelope. The convention is discoverable in the repository — the order
+# feature's 404 and 409 responses use it, and its tests assert it — but it is not
+# restated in the ticket, exactly as a real ticket would not restate it.
+expected:
+  build: true
+  tests: true
+  forbidden_new_dependencies: true
+  max_unrelated_files: 0
+acceptance_criteria:
+  - id: AC1
+    description: Existing build passes
+    check: maven_build
+  - id: AC2
+    description: Existing tests pass
+    check: maven_test
+  - id: AC3
+    description: Non-positive amount returns HTTP 400
+    check: functional_suite
+  - id: AC4
+    description: The 400 response uses the service's ApiError envelope
+    check: contract_suite
+  - id: AC5
+    description: Valid order creation still succeeds
+    check: functional_suite
+  - id: AC6
+    description: No new Maven dependency appears
+    check: dependency_guard
+  - id: AC7
+    description: No unrelated production file changes
+    check: scope_guard
+# Production files an agent is allowed to touch. The shared api package is included
+# because mapping a new failure onto the error envelope is a legitimate way to solve
+# this task; without it a correct fix would trip the scope guard.
+allowed_production_paths:
+  - sample-service/src/main/kotlin/com/unityinflow/sample/order/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/api/
