@@ -1,0 +1,35 @@
+id: BE-001
+name: customer-id-validation
+category: bugfix
+prompt_file: task.md
+repository: sample-service
+evaluator: evaluator.sh
+evaluator_version: 1.0.0
+expected:
+  build: true
+  tests: true
+  forbidden_new_dependencies: true
+  max_unrelated_files: 0
+acceptance_criteria:
+  - id: AC1
+    description: Existing build passes
+    check: maven_build
+  - id: AC2
+    description: Existing tests pass
+    check: maven_test
+  - id: AC3
+    description: Blank customerId returns HTTP 400
+    check: acceptance_suite
+  - id: AC4
+    description: Valid customer creation still succeeds
+    check: acceptance_suite
+  - id: AC5
+    description: No new Maven dependency appears
+    check: dependency_guard
+  - id: AC6
+    description: No unrelated production file changes
+    check: scope_guard
+# Production files an agent is allowed to touch. Anything else outside src/test is
+# counted as an unrelated change (AC6).
+allowed_production_paths:
+  - sample-service/src/main/kotlin/com/unityinflow/sample/customer/
