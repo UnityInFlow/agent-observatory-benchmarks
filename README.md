@@ -183,6 +183,26 @@ and implemented it, against the wrong model of how this service reports errors.
 The second row is the one that matters. It is a plausible, competent submission, and if it
 ever starts returning `0` this benchmark has stopped measuring anything.
 
+### What the first five baseline runs showed
+
+Claude Code / `claude-haiku-4-5`, plain agent: **4 pass, 1 fail (F07)**.
+
+Two results worth stating plainly rather than burying:
+
+- **20% is below the 30–70% band** benchmarks#6 asked for. BE-002 discriminates where
+  BE-001 did not, but it has not met its own exit criterion.
+- **AC4 never fired.** Every run that reached the error-contract check matched the
+  envelope — the agent reads the neighbouring 404/409 handlers. The premise that the
+  obvious answer wins is weaker than assumed for this model.
+
+The one failure was a **scratch file**: the agent wrote `run_tests.sh` into the repository
+root and left it there. That counts as an unrelated production change **by design** — see
+`scratch_files_count_as_unrelated` in `benchmark.yaml`. A reviewer would reject a diff
+that ships a helper script nobody asked for, and leaving no litter behind is measurable
+and instructable. Recording the decision matters more than the decision itself: a guard
+that fails a run must be something the benchmark meant to enforce, not a side effect of
+an allow-list.
+
 Verifying BE-002 turned up a defect that also affected BE-001: the acceptance suite's
 *compiled* classes survived in `target/`, which `git clean -fd` leaves alone because
 `target/` is gitignored, so a second evaluation of the same worktree ran them as part of
