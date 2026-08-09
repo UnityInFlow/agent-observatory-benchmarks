@@ -26,8 +26,17 @@ build: ## Package the fixture without running tests
 	@cd $(SERVICE) && ./mvnw -B -q -DskipTests package
 
 .PHONY: verify-evaluator
-verify-evaluator: ## Prove the evaluator discriminates good from bad submissions
+verify-evaluator: ## Prove the evaluator discriminates good from bad submissions (BENCH=...)
 	@$(BENCH_DIR)/verify-evaluator.sh
+
+.PHONY: verify-all
+verify-all: ## Run every benchmark's evaluator verification
+	@status=0; \
+	for script in tasks/*/verify-evaluator.sh; do \
+	  echo "==> $$script"; \
+	  "$$script" || status=1; \
+	done; \
+	exit $$status
 
 .PHONY: evaluate
 evaluate: ## Judge the current working tree against the baseline commit

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 #
-# BE-001 deterministic evaluator.
+# BE-002 deterministic evaluator.
 #
 # Contract: no LLM is consulted. Every acceptance criterion is decided by an
 # executable check, in the priority order of chapter 00 section 9:
-#   1. build   2. tests   3. evaluator-owned acceptance suite   4. structural guards
+#   1. build   2. tests   3. evaluator-owned acceptance suites   4. structural guards
+#
+# BE-002 splits the acceptance suite in two, which BE-001 did not need:
+#   functional  did the endpoint start rejecting the bad input, and still accept good?
+#   contract    did it report the rejection in this service's error envelope?
+# A submission can pass the first and fail the second — the obvious `@Positive` + `@Valid`
+# answer does exactly that — and calling both "F03 incorrect code" would throw away the
+# most interesting thing this benchmark measures.
 #
 # Usage:
 #   evaluator.sh [--baseline <sha>] [--service <dir>] [--out <evaluation.json>]
@@ -15,7 +22,8 @@
 #   0   all acceptance criteria passed
 #   10  build failure                      (F04)
 #   11  existing tests failed               (F05)
-#   12  acceptance suite failed             (F03)
+#   12  functional acceptance failed        (F03)
+#   13  error contract violated             (F02)
 #   20  new dependency introduced           (F07)
 #   21  unrelated production files changed  (F07)
 #   30  evaluator/infrastructure failure    (F15)
@@ -35,7 +43,7 @@ while [[ $# -gt 0 ]]; do
     --service)  SERVICE_DIR="$2";  shift 2 ;;
     --out)      EVALUATION_OUT="$2"; shift 2 ;;
     --run-id)   RUN_ID="$2"; shift 2 ;;
-    -h|--help)  sed -n '2,20p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)  sed -n '2,30p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "evaluator: unknown argument '$1'" >&2; exit 30 ;;
   esac
 done
@@ -69,16 +77,19 @@ SERVICE_REL="$(git -C "$SERVICE_DIR" rev-parse --show-prefix)" \
 SERVICE_REL="${SERVICE_REL%/}"
 [[ -n "$SERVICE_REL" ]] || die "service directory must not be the repository root"
 
-# Production paths the agent is allowed to touch (AC6). Kept in sync with benchmark.yaml.
+# Production paths the agent is allowed to touch (AC7). Kept in sync with benchmark.yaml.
+# The shared api package is allowed: mapping the new failure onto the error envelope is a
+# legitimate solution, and forbidding it would fail correct work on a technicality.
 ALLOWED_PRODUCTION_PREFIXES=(
-  "${SERVICE_REL}/src/main/kotlin/com/unityinflow/sample/customer/"
+  "${SERVICE_REL}/src/main/kotlin/com/unityinflow/sample/order/"
+  "${SERVICE_REL}/src/main/kotlin/com/unityinflow/sample/api/"
 )
 # Test sources are always allowed — the task explicitly permits adding tests.
 TEST_PREFIX="${SERVICE_REL}/src/test/"
 
 log() { printf '  %-34s %s\n' "$1" "$2"; }
 
-echo "BE-001 evaluator ${EVALUATOR_VERSION}"
+echo "BE-002 evaluator ${EVALUATOR_VERSION}"
 echo "  repo      ${REPO_ROOT}"
 echo "  service   ${SERVICE_REL}"
 echo "  baseline  ${BASELINE_SHA:0:12}"
@@ -117,15 +128,17 @@ echo
 # ---------------------------------------------------------------------------
 # 0b. Remove anything a previous evaluation left behind
 # ---------------------------------------------------------------------------
-# The acceptance suite is copied into the service and deleted afterwards, but its
-# *compiled* class survives in target/, which `git clean -fd` does not touch because
-# target/ is gitignored. Evaluating the same worktree twice would then run it as part of
-# AC2 and report "the agent broke the existing tests" — the harness blaming the agent for
-# the harness again. Purge both forms before anything is measured.
-ACCEPTANCE_CLASS_DIR="${SERVICE_DIR}/target/test-classes/com/unityinflow/sample/customer"
+# The acceptance suites are copied into the service and deleted afterwards, but their
+# *compiled* classes survive in target/, which `git clean -fd` does not touch because
+# target/ is gitignored. A second evaluation of the same worktree would then run them as
+# part of AC2 and report "the agent broke the existing tests" — the harness blaming the
+# agent for the harness again. Purge both forms before anything is measured.
+ACCEPTANCE_CLASS_DIR="${SERVICE_DIR}/target/test-classes/com/unityinflow/sample/order"
 purge_acceptance_artifacts() {
-  rm -f "${SERVICE_DIR}/src/test/kotlin/com/unityinflow/sample/customer/BE001AcceptanceTest.kt"
-  rm -f "${ACCEPTANCE_CLASS_DIR}"/BE001AcceptanceTest*.class
+  rm -f "${SERVICE_DIR}/src/test/kotlin/com/unityinflow/sample/order/BE002FunctionalTest.kt" \
+        "${SERVICE_DIR}/src/test/kotlin/com/unityinflow/sample/order/BE002ContractTest.kt"
+  rm -f "${ACCEPTANCE_CLASS_DIR}"/BE002FunctionalTest*.class \
+        "${ACCEPTANCE_CLASS_DIR}"/BE002ContractTest*.class
 }
 purge_acceptance_artifacts
 
@@ -133,46 +146,68 @@ purge_acceptance_artifacts
 # 1. AC1 — build
 # ---------------------------------------------------------------------------
 BUILD_PASSED=false
-if (cd "$SERVICE_DIR" && ./mvnw -B -q -DskipTests package >/tmp/be001-build.log 2>&1); then
+if (cd "$SERVICE_DIR" && ./mvnw -B -q -DskipTests package >/tmp/be002-build.log 2>&1); then
   BUILD_PASSED=true
 fi
 log "AC1 build" "$([[ $BUILD_PASSED == true ]] && echo PASS || echo FAIL)"
 
 # ---------------------------------------------------------------------------
-# 2. AC2 — the repository's own tests, without the acceptance suite present
+# 2. AC2 — the repository's own tests, without the acceptance suites present
 # ---------------------------------------------------------------------------
 TESTS_PASSED=false
 if [[ $BUILD_PASSED == true ]]; then
-  if (cd "$SERVICE_DIR" && ./mvnw -B -q test >/tmp/be001-tests.log 2>&1); then
+  if (cd "$SERVICE_DIR" && ./mvnw -B -q test >/tmp/be002-tests.log 2>&1); then
     TESTS_PASSED=true
   fi
 fi
 log "AC2 existing tests" "$([[ $TESTS_PASSED == true ]] && echo PASS || echo FAIL)"
 
 # ---------------------------------------------------------------------------
-# 3. AC3/AC4 — evaluator-owned acceptance suite
+# 3. AC3/AC5 (functional) and AC4 (contract) — evaluator-owned suites
 # ---------------------------------------------------------------------------
-ACCEPTANCE_SRC="${BENCHMARK_DIR}/acceptance/BE001AcceptanceTest.kt"
-ACCEPTANCE_DST="${SERVICE_DIR}/src/test/kotlin/com/unityinflow/sample/customer/BE001AcceptanceTest.kt"
+ACCEPTANCE_DIR="${SERVICE_DIR}/src/test/kotlin/com/unityinflow/sample/order"
+FUNCTIONAL_DST="${ACCEPTANCE_DIR}/BE002FunctionalTest.kt"
+CONTRACT_DST="${ACCEPTANCE_DIR}/BE002ContractTest.kt"
 cleanup() { purge_acceptance_artifacts; }
 trap cleanup EXIT
 
-ACCEPTANCE_PASSED=false
+FUNCTIONAL_PASSED=false
+CONTRACT_PASSED=false
 if [[ $BUILD_PASSED == true ]]; then
-  [[ -f "$ACCEPTANCE_SRC" ]] || die "acceptance suite missing: $ACCEPTANCE_SRC"
-  mkdir -p "$(dirname "$ACCEPTANCE_DST")"
-  cp "$ACCEPTANCE_SRC" "$ACCEPTANCE_DST"
+  # Both suites are compiled together — Kotlin compiles the whole test source set — so
+  # they are copied in together and selected one at a time by -Dtest.
+  mkdir -p "$ACCEPTANCE_DIR" || die "cannot create $ACCEPTANCE_DIR"
+  cp "${BENCHMARK_DIR}/acceptance/BE002FunctionalTest.kt" "$FUNCTIONAL_DST" 2>/dev/null \
+    || die "acceptance suite missing: BE002FunctionalTest.kt"
+  cp "${BENCHMARK_DIR}/acceptance/BE002ContractTest.kt" "$CONTRACT_DST" 2>/dev/null \
+    || die "acceptance suite missing: BE002ContractTest.kt"
+
   if (cd "$SERVICE_DIR" && ./mvnw -B -q test \
-        -Dtest=BE001AcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false \
-        >/tmp/be001-acceptance.log 2>&1); then
-    ACCEPTANCE_PASSED=true
+        -Dtest=BE002FunctionalTest -Dsurefire.failIfNoSpecifiedTests=false \
+        >/tmp/be002-functional.log 2>&1); then
+    FUNCTIONAL_PASSED=true
+  fi
+
+  # The contract verdict is only meaningful once the behaviour is right: if nothing
+  # rejects the order there is no error response to judge the shape of.
+  if [[ $FUNCTIONAL_PASSED == true ]]; then
+    if (cd "$SERVICE_DIR" && ./mvnw -B -q test \
+          -Dtest=BE002ContractTest -Dsurefire.failIfNoSpecifiedTests=false \
+          >/tmp/be002-contract.log 2>&1); then
+      CONTRACT_PASSED=true
+    fi
   fi
   cleanup
 fi
-log "AC3/AC4 acceptance suite" "$([[ $ACCEPTANCE_PASSED == true ]] && echo PASS || echo FAIL)"
+log "AC3/AC5 functional suite" "$([[ $FUNCTIONAL_PASSED == true ]] && echo PASS || echo FAIL)"
+log "AC4 error contract" "$(
+  if [[ $CONTRACT_PASSED == true ]]; then echo PASS
+  elif [[ $FUNCTIONAL_PASSED == true ]]; then echo "FAIL (right status, wrong envelope)"
+  else echo "not reached"; fi
+)"
 
 # ---------------------------------------------------------------------------
-# 4. AC5 — dependency guard
+# 4. AC6 — dependency guard
 # ---------------------------------------------------------------------------
 POM_REL="${SERVICE_REL}/pom.xml"
 deps_of() { grep -oE '<artifactId>[^<]+</artifactId>' | sed -E 's|</?artifactId>||g' | sort; }
@@ -183,10 +218,10 @@ CURR_DEPS="$(deps_of < "${SERVICE_DIR}/pom.xml" || true)"
 [[ -n "$BASE_DEPS" ]] || die "cannot read baseline pom at ${BASELINE_SHA}:${POM_REL}"
 NEW_DEPENDENCIES="$(comm -13 <(echo "$BASE_DEPS") <(echo "$CURR_DEPS") | grep -c . || true)"
 DEPENDENCY_GUARD_PASSED=$([[ "$NEW_DEPENDENCIES" -eq 0 ]] && echo true || echo false)
-log "AC5 no new dependencies" "$([[ $DEPENDENCY_GUARD_PASSED == true ]] && echo PASS || echo "FAIL (+${NEW_DEPENDENCIES})")"
+log "AC6 no new dependencies" "$([[ $DEPENDENCY_GUARD_PASSED == true ]] && echo PASS || echo "FAIL (+${NEW_DEPENDENCIES})")"
 
 # ---------------------------------------------------------------------------
-# 5. AC6 — scope guard
+# 5. AC7 — scope guard
 # ---------------------------------------------------------------------------
 UNRELATED_FILES=""
 while IFS= read -r f; do
@@ -206,7 +241,7 @@ EOF
 
 UNRELATED_COUNT="$(printf '%s' "$UNRELATED_FILES" | grep -c . || true)"
 SCOPE_GUARD_PASSED=$([[ "$UNRELATED_COUNT" -eq 0 ]] && echo true || echo false)
-log "AC6 scope discipline" "$([[ $SCOPE_GUARD_PASSED == true ]] && echo PASS || echo "FAIL (${UNRELATED_COUNT} unrelated)")"
+log "AC7 scope discipline" "$([[ $SCOPE_GUARD_PASSED == true ]] && echo PASS || echo "FAIL (${UNRELATED_COUNT} unrelated)")"
 printf '%s' "$UNRELATED_FILES" | while IFS= read -r f; do [ -n "$f" ] && echo "      unrelated: $f"; done
 
 # ---------------------------------------------------------------------------
@@ -239,18 +274,23 @@ read -r ADDED DELETED <<<"$(git -C "$REPO_ROOT" diff --numstat "$BASELINE_SHA" -
 # 8. Verdict, failure classification, evaluation.json
 # ---------------------------------------------------------------------------
 PASSED=0
-[[ $BUILD_PASSED           == true ]] && PASSED=$((PASSED+1))
-[[ $TESTS_PASSED           == true ]] && PASSED=$((PASSED+1))
-[[ $ACCEPTANCE_PASSED      == true ]] && PASSED=$((PASSED+2))   # AC3 + AC4
+[[ $BUILD_PASSED            == true ]] && PASSED=$((PASSED+1))
+[[ $TESTS_PASSED            == true ]] && PASSED=$((PASSED+1))
+[[ $FUNCTIONAL_PASSED       == true ]] && PASSED=$((PASSED+2))   # AC3 + AC5
+[[ $CONTRACT_PASSED         == true ]] && PASSED=$((PASSED+1))   # AC4
 [[ $DEPENDENCY_GUARD_PASSED == true ]] && PASSED=$((PASSED+1))
-[[ $SCOPE_GUARD_PASSED     == true ]] && PASSED=$((PASSED+1))
-TOTAL=6
+[[ $SCOPE_GUARD_PASSED      == true ]] && PASSED=$((PASSED+1))
+TOTAL=7
 
+# F02 "wrong architecture assumption" is the honest label for the contract failure: the
+# agent understood the requirement and implemented it, against the wrong model of how
+# this service reports errors.
 EXIT_CODE=0
 FAILURE_CLASS=null
 if   [[ $BUILD_PASSED            != true ]]; then EXIT_CODE=10; FAILURE_CLASS='"F04"'
 elif [[ $TESTS_PASSED            != true ]]; then EXIT_CODE=11; FAILURE_CLASS='"F05"'
-elif [[ $ACCEPTANCE_PASSED       != true ]]; then EXIT_CODE=12; FAILURE_CLASS='"F03"'
+elif [[ $FUNCTIONAL_PASSED       != true ]]; then EXIT_CODE=12; FAILURE_CLASS='"F03"'
+elif [[ $CONTRACT_PASSED         != true ]]; then EXIT_CODE=13; FAILURE_CLASS='"F02"'
 elif [[ $DEPENDENCY_GUARD_PASSED != true ]]; then EXIT_CODE=20; FAILURE_CLASS='"F07"'
 elif [[ $SCOPE_GUARD_PASSED      != true ]]; then EXIT_CODE=21; FAILURE_CLASS='"F07"'
 fi
@@ -263,7 +303,8 @@ jq -n \
   --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson buildPassed "$BUILD_PASSED" \
   --argjson testsPassed "$TESTS_PASSED" \
-  --argjson acceptancePassed "$ACCEPTANCE_PASSED" \
+  --argjson functionalPassed "$FUNCTIONAL_PASSED" \
+  --argjson contractPassed "$CONTRACT_PASSED" \
   --argjson passed "$PASSED" \
   --argjson total "$TOTAL" \
   --argjson unrelated "$UNRELATED_COUNT" \
@@ -277,7 +318,7 @@ jq -n \
   --argjson failureClass "$FAILURE_CLASS" \
   '{
      runId: (if $runId == "" then null else $runId end),
-     benchmarkId: "BE-001",
+     benchmarkId: "BE-002",
      evaluatorVersion: $version,
      completedAt: $completedAt,
      exitCode: $exitCode,
@@ -286,7 +327,7 @@ jq -n \
      correctness: {
        buildPassed: $buildPassed,
        testsPassed: $testsPassed,
-       acceptanceSuitePassed: $acceptancePassed,
+       acceptanceSuitePassed: ($functionalPassed and $contractPassed),
        acceptanceCriteriaPassed: $passed,
        acceptanceCriteriaTotal: $total
      },
