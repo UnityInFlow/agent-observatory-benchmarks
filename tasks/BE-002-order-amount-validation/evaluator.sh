@@ -27,6 +27,9 @@
 #   20  new dependency introduced           (F07)
 #   21  unrelated production files changed  (F07)
 #   30  evaluator/infrastructure failure    (F15)
+#
+# `taskAttempted` is reported in evaluation.json but never changes the exit code: see the
+# note at AC0 for why the deterministic layer must not guess why an agent produced nothing.
 set -uo pipefail
 
 BENCHMARK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -152,15 +155,57 @@ fi
 log "AC1 build" "$([[ $BUILD_PASSED == true ]] && echo PASS || echo FAIL)"
 
 # ---------------------------------------------------------------------------
-# 2. AC2 — the repository's own tests, without the acceptance suites present
+# 2. AC2 — the repository's own tests, at their baseline content
 # ---------------------------------------------------------------------------
-TESTS_PASSED=false
-if [[ $BUILD_PASSED == true ]]; then
-  if (cd "$SERVICE_DIR" && ./mvnw -B -q test >/tmp/be002-tests.log 2>&1); then
-    TESTS_PASSED=true
+# "Existing tests" has to mean the tests that existed. Running a bare `./mvnw test`
+# compiles the whole test source set, so it also ran whatever the agent had just written —
+# and an agent that writes the test before the implementation, then stops, was recorded as
+# having *broken the existing suite*. That is the harness blaming the agent again, and it
+# penalises test-first work specifically.
+#
+# So AC2 restores the baseline test sources, measures those, and puts the agent's tests
+# back. The agent's own tests are still measured, separately, as a quality signal — they
+# are just not allowed to decide "did this change break what already worked".
+AGENT_TEST_STASH="$(mktemp -d)"
+TEST_DIR_ABS="${SERVICE_DIR}/src/test"
+restore_agent_tests() {
+  if [[ -d "$AGENT_TEST_STASH/test" ]]; then
+    rm -rf "$TEST_DIR_ABS"
+    cp -R "$AGENT_TEST_STASH/test" "$TEST_DIR_ABS"
+    rm -rf "$AGENT_TEST_STASH"
   fi
+}
+
+TESTS_PASSED=false
+AGENT_TESTS_PASSED=null
+if [[ $BUILD_PASSED == true ]]; then
+  # Measure the agent's own suite first, while its files are still in place.
+  if (cd "$SERVICE_DIR" && ./mvnw -B -q test >/tmp/be002-agent-tests.log 2>&1); then
+    AGENT_TESTS_PASSED=true
+  else
+    AGENT_TESTS_PASSED=false
+  fi
+
+  cp -R "$TEST_DIR_ABS" "$AGENT_TEST_STASH/test" || die "cannot stash the agent's tests"
+  trap 'restore_agent_tests; purge_acceptance_artifacts' EXIT
+  if git -C "$REPO_ROOT" checkout "$BASELINE_SHA" -- "${SERVICE_REL}/src/test/" 2>/dev/null; then
+    if (cd "$SERVICE_DIR" && ./mvnw -B -q test >/tmp/be002-tests.log 2>&1); then
+      TESTS_PASSED=true
+    fi
+  else
+    restore_agent_tests
+    die "cannot restore baseline test sources at ${BASELINE_SHA}"
+  fi
+  restore_agent_tests
+  git -C "$REPO_ROOT" reset -q -- "${SERVICE_REL}/src/test/" 2>/dev/null || true
 fi
 log "AC2 existing tests" "$([[ $TESTS_PASSED == true ]] && echo PASS || echo FAIL)"
+log "    agent's own tests" "$(
+  case "$AGENT_TESTS_PASSED" in
+    true) echo "pass (recorded, not an AC)" ;;
+    false) echo "fail (recorded, not an AC)" ;;
+    *) echo "not run" ;;
+  esac)"
 
 # ---------------------------------------------------------------------------
 # 3. AC3/AC5 (functional) and AC4 (contract) — evaluator-owned suites
@@ -168,7 +213,9 @@ log "AC2 existing tests" "$([[ $TESTS_PASSED == true ]] && echo PASS || echo FAI
 ACCEPTANCE_DIR="${SERVICE_DIR}/src/test/kotlin/com/unityinflow/sample/order"
 FUNCTIONAL_DST="${ACCEPTANCE_DIR}/BE002FunctionalTest.kt"
 CONTRACT_DST="${ACCEPTANCE_DIR}/BE002ContractTest.kt"
-cleanup() { purge_acceptance_artifacts; }
+# restore_agent_tests is idempotent and a no-op once the stash is gone; it stays in the
+# trap so an abort between the stash and the restore cannot leave the agent's work deleted.
+cleanup() { purge_acceptance_artifacts; restore_agent_tests; }
 trap cleanup EXIT
 
 FUNCTIONAL_PASSED=false
@@ -241,6 +288,40 @@ EOF
 
 UNRELATED_COUNT="$(printf '%s' "$UNRELATED_FILES" | grep -c . || true)"
 SCOPE_GUARD_PASSED=$([[ "$UNRELATED_COUNT" -eq 0 ]] && echo true || echo false)
+
+# ---------------------------------------------------------------------------
+# 5b. Did the agent attempt the task at all?
+# ---------------------------------------------------------------------------
+# BE-002 cannot be solved without changing production code. A run that changed none did
+# not attempt the task, and whatever went wrong happened to the harness or the session —
+# not to the agent's engineering.
+#
+# This exists because seven runs of one arm wrote a test, asked for permission to run the
+# build, and stopped. Every one was filed as "incorrect code" and the arm read as a 30%
+# pass rate for a capable model. The telemetry could not see it: permissionDenials was 0,
+# because nothing was ever refused — the agent simply declined to proceed.
+#
+# This records the fact and does NOT reclassify the run. The evaluator cannot tell a
+# blocked agent from one that gave up, and guessing "infrastructure" would be worse than
+# the bug it fixes: every agent that failed to produce code would drop out of the
+# aggregates instead of counting as a failure. That is an error in the flattering
+# direction, and this project has been caught by two of those already.
+#
+# So the deterministic layer reports `taskAttempted`, and the analysis layer — which fails
+# closed by design — is where a batch containing unattempted runs gets refused.
+PRODUCTION_CHANGED=0
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  for p in "${ALLOWED_PRODUCTION_PREFIXES[@]}"; do
+    case "$f" in "$p"*) PRODUCTION_CHANGED=$((PRODUCTION_CHANGED+1)); break ;; esac
+  done
+done <<EOF
+$CHANGED_FILES
+EOF
+ATTEMPTED=$([[ "$PRODUCTION_CHANGED" -gt 0 ]] && echo true || echo false)
+log "AC0 task attempted" "$(
+  if [[ $ATTEMPTED == true ]]; then echo "yes (${PRODUCTION_CHANGED} production file(s))"
+  else echo "NO — no production file changed"; fi)"
 log "AC7 scope discipline" "$([[ $SCOPE_GUARD_PASSED == true ]] && echo PASS || echo "FAIL (${UNRELATED_COUNT} unrelated)")"
 printf '%s' "$UNRELATED_FILES" | while IFS= read -r f; do [ -n "$f" ] && echo "      unrelated: $f"; done
 
@@ -303,6 +384,9 @@ jq -n \
   --arg completedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   --argjson buildPassed "$BUILD_PASSED" \
   --argjson testsPassed "$TESTS_PASSED" \
+  --argjson agentTestsPassed "$AGENT_TESTS_PASSED" \
+  --argjson attempted "$ATTEMPTED" \
+  --argjson productionChanged "$PRODUCTION_CHANGED" \
   --argjson functionalPassed "$FUNCTIONAL_PASSED" \
   --argjson contractPassed "$CONTRACT_PASSED" \
   --argjson passed "$PASSED" \
@@ -325,8 +409,11 @@ jq -n \
      passed: ($exitCode == 0),
      failureClass: $failureClass,
      correctness: {
+       taskAttempted: $attempted,
+       productionFilesChanged: $productionChanged,
        buildPassed: $buildPassed,
        testsPassed: $testsPassed,
+       agentTestsPassed: $agentTestsPassed,
        acceptanceSuitePassed: ($functionalPassed and $contractPassed),
        acceptanceCriteriaPassed: $passed,
        acceptanceCriteriaTotal: $total
