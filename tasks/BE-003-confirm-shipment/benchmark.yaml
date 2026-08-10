@@ -1,0 +1,60 @@
+id: BE-003
+name: confirm-shipment
+category: feature
+prompt_file: task.md
+repository: sample-service
+evaluator: evaluator.sh
+evaluator_version: 1.0.0
+# Why this benchmark exists: BE-001 never failed and BE-002 is a one-line bugfix, so
+# neither exercises design. This is the business case's own §18 first task — it needs REST
+# design, state validation, idempotency, persistence and error handling in one change,
+# which is what a real backend ticket looks like.
+#
+# It has two independent traps, and they fail in different ways:
+#
+#   idempotency  a repeated confirm must succeed. ConflictException already exists in this
+#                service and a repeat reads like a conflict, so 409 is the natural wrong
+#                answer. The requirement says otherwise, in the ticket, in bold.
+#   contract     the 409 and 404 must travel through the ApiError envelope. Spring's
+#                default handling produces the right status with the wrong body, exactly
+#                as @Positive + @Valid does in BE-002.
+#
+# An agent can fail either without failing the other, which is why the acceptance suite is
+# split and why the contract verdict is only read once the behaviour is right.
+expected:
+  build: true
+  tests: true
+  forbidden_new_dependencies: true
+  max_unrelated_files: 0
+acceptance_criteria:
+  - id: AC1
+    description: Existing build passes
+    check: maven_build
+  - id: AC2
+    description: Existing tests pass
+    check: maven_test
+  - id: AC3
+    description: Confirming a created shipment returns 200 and persists CONFIRMED
+    check: functional_suite
+  - id: AC4
+    description: Error responses use the service's ApiError envelope
+    check: contract_suite
+  - id: AC5
+    description: Repeat confirm is idempotent; cancelled is 409; unknown is 404
+    check: functional_suite
+  - id: AC6
+    description: No new Maven dependency appears
+    check: dependency_guard
+  - id: AC7
+    description: No unrelated production file changes
+    check: scope_guard
+# Production files an agent is allowed to touch. The shared api package is included
+# because the fixture has no error code for "cannot confirm from this state" — adding one
+# is the intended solution, and forbidding it would fail correct work on a technicality.
+allowed_production_paths:
+  - sample-service/src/main/kotlin/com/unityinflow/sample/shipment/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/api/
+# Same rule as BE-002: everything outside those paths and src/test/ is an unrelated
+# change, including an agent's own scratch files. Build output is exempt via the
+# evaluator's ignore pattern.
+scratch_files_count_as_unrelated: true
