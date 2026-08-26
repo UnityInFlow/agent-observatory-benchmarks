@@ -1,18 +1,16 @@
-# The benchmark fixture pins its dependencies on purpose: AC6 fails a submission that adds
-# one, so the dependency set is part of the measurement. Updates are surfaced monthly for a
-# human to decide on, never batched or auto-merged.
+# Actions only. sample-service is deliberately NOT watched.
+#
+# The fixture is the thing under test. Its dependency versions are part of the measurement:
+# every result on record was produced against a specific Spring Boot and Kotlin, and bumping
+# them changes the code an agent is asked to modify. A run measured against Spring Boot 4.1
+# is not comparable to one measured against 4.0, and nothing downstream would notice the
+# difference -- it would read as an effect.
+#
+# That is the same environment-constancy rule check-environment-constancy.py enforces on the
+# runner side, applied to the fixture. Upgrade it deliberately, in a PR that says which
+# results are invalidated, and re-run the baseline afterwards.
 version: 2
 updates:
-  - package-ecosystem: maven
-    directory: /sample-service
-    schedule:
-      interval: monthly
-    open-pull-requests-limit: 3
-    commit-message:
-      prefix: "deps"
-    labels:
-      - dependencies
-
   - package-ecosystem: github-actions
     directory: /
     schedule:
