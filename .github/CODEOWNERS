@@ -1,0 +1,7 @@
+# Default owner for everything.
+*                       @hermanngeorge15
+
+# The measurement contract. Changing a task, an evaluator or a fixture changes what every
+# past result means — these need a deliberate look, not a rubber stamp.
+/tasks/                 @hermanngeorge15
+/sample-service/        @hermanngeorge15

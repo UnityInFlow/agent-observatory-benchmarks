@@ -1,0 +1,22 @@
+# The benchmark fixture pins its dependencies on purpose: AC6 fails a submission that adds
+# one, so the dependency set is part of the measurement. Updates are surfaced monthly for a
+# human to decide on, never batched or auto-merged.
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: /sample-service
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps"
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies

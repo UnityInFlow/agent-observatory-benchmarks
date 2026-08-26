@@ -1,0 +1,33 @@
+# The sample service's own test suite — "the existing tests" every benchmark's AC2 depends
+# on. If these break, every evaluator starts reporting F05 and blaming the agent for the
+# fixture.
+name: fixture-tests
+
+on:
+  pull_request:
+    paths: ['sample-service/**', '.github/workflows/fixture-tests.yml']
+  push:
+    branches: [main]
+    paths: ['sample-service/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fixture-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: sample-service suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+      - run: make test
