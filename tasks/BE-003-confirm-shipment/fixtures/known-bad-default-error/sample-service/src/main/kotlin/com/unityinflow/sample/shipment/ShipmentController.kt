@@ -14,13 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * Known-bad fixture: correct behaviour, wrong error contract.
- *
- * The state machine is right and every status code is right, but the refusals are raised
- * as ResponseStatusException, so Spring renders its default body — {timestamp, status,
- * error, path} — instead of this service's ApiError envelope. Functionally indistinguishable
- * from the reference solution; contractually wrong. This is BE-002's trap in a new place,
- * and the evaluator must report it as F02 rather than F03.
+ * REST endpoints for shipments: create, fetch, list, and confirm.
  */
 @RestController
 @RequestMapping("/shipments")

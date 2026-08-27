@@ -13,18 +13,7 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPat
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
 /**
- * Tests the submission author wrote for BE-003 — the STRONG version.
- *
- * This is not the evaluator's acceptance suite; it is what a careful engineer would leave
- * behind. It is the high-quality half of the test-quality fixture pair, and it differs from
- * `good-weak-tests` in three ways that a rubric can point at:
- *
- *  - the repeat is exercised, not assumed: confirm is called twice and the two responses
- *    are compared, which is the one behaviour the ticket states in bold
- *  - refusals assert the error ENVELOPE body, not just the status code. A submission using
- *    Spring's default error body returns the same 409 and would pass a status-only test
- *  - persistence is verified by re-reading the shipment, not by trusting the object the
- *    mutating call happened to return
+ * Tests for the confirm-shipment endpoint.
  */
 @SpringBootTest
 @AutoConfigureMockMvc

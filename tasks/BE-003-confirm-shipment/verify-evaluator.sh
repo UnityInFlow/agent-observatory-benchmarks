@@ -47,6 +47,11 @@ EVALUATOR="$WORK/tasks/BE-003-confirm-shipment/evaluator.sh"
 GOOD_OVERLAY="$BENCHMARK_DIR/fixtures/known-good"
 CONFLICT_OVERLAY="$BENCHMARK_DIR/fixtures/known-bad-repeat-conflict"
 DEFAULT_ERR_OVERLAY="$BENCHMARK_DIR/fixtures/known-bad-default-error"
+
+# The gate-passing quality variants. Each differs from known-good on exactly one quality
+# dimension and must still exit 0 — that is the property the whole rubric population rests
+# on, and until now nothing executed to check it.
+QUALITY_VARIANTS=(good-inline-envelope good-nested-ifs good-noisy-diff good-strong-tests good-weak-tests)
 APP_KT="$WORK/sample-service/src/main/kotlin/com/unityinflow/sample/SampleServiceApplication.kt"
 POM="$WORK/sample-service/pom.xml"
 
@@ -61,6 +66,10 @@ apply_repeat_conflict()  { cp -R "$CONFLICT_OVERLAY"/. "$WORK"/; }
 # compiled against the same ApiError. Only the controller differs.
 apply_default_error()    { cp -R "$GOOD_OVERLAY"/. "$WORK"/; cp -R "$DEFAULT_ERR_OVERLAY"/. "$WORK"/; }
 
+# A quality variant is a complete submission, not a patch on known-good: it carries the
+# whole controller and the ApiError enum entry. Applied alone, like known-good is.
+apply_variant()          { cp -R "$BENCHMARK_DIR/fixtures/$1"/. "$WORK"/; }
+
 # Adds a change to a production file the task forbids touching.
 apply_scope_violation() {
   printf '\n// unrelated production edit introduced by the agent\n' >> "$APP_KT"
@@ -72,10 +81,14 @@ apply_new_dependency() {
 }
 
 FAILURES=0
+CASES=0
 run_case() {
   local name="$1" expected="$2"; shift 2
+  CASES=$((CASES + 1))
   reset_worktree
-  for mutation in "$@"; do "$mutation"; done
+  # Unquoted on purpose: a mutation may carry an argument, e.g. "apply_variant good-nested-ifs".
+  # shellcheck disable=SC2086
+  for mutation in "$@"; do $mutation; done
 
   echo
   echo "=============================================================="
@@ -102,9 +115,27 @@ run_case known-good          0 apply_known_good
 run_case scope-violation    21 apply_known_good apply_scope_violation
 run_case new-dependency     20 apply_known_good apply_new_dependency
 
+# Every gate-passing variant, registered. A quality rubric only scores submissions that
+# already cleared every gate, so a variant that quietly stopped clearing them would silently
+# leave the scored population and nobody would notice until a score looked odd.
+for variant in "${QUALITY_VARIANTS[@]}"; do
+  run_case "$variant" 0 "apply_variant $variant"
+done
+
+# And no fixture may go unregistered: one that nothing runs is one nothing tests.
+for dir in "$BENCHMARK_DIR"/fixtures/*/; do
+  fixture="$(basename "$dir")"
+  case " known-good known-bad-repeat-conflict known-bad-default-error ${QUALITY_VARIANTS[*]} " in
+    *" $fixture "*) ;;
+    *) echo "UNREGISTERED FIXTURE: $fixture — add a run_case for it"; FAILURES=$((FAILURES + 1)) ;;
+  esac
+done
+
 echo
 if [[ "$FAILURES" -eq 0 ]]; then
-  echo "verify-evaluator: all 6 cases behaved as specified — evaluator discriminates."
+  # Counted, not hardcoded: the line said "all 6" while 11 cases ran, which is how a
+  # suite quietly stops covering what it claims to.
+  echo "verify-evaluator: all ${CASES} cases behaved as specified — evaluator discriminates."
   exit 0
 fi
 echo "verify-evaluator: ${FAILURES} case(s) misbehaved." >&2
