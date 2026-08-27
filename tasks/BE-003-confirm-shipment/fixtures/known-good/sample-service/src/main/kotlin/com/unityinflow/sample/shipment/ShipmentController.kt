@@ -13,14 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * Reference solution for BE-003.
- *
- * Two decisions are the point of the benchmark:
- *
- *  - a repeat confirm returns the shipment unchanged rather than throwing. Retrying a
- *    completed transition is not a conflict, and the caller retries.
- *  - both refusals go through [ApiException] subclasses, so they are rendered by
- *    GlobalExceptionHandler into the service envelope rather than Spring's default body.
+ * REST endpoints for shipments: create, fetch, list, and confirm.
  */
 @RestController
 @RequestMapping("/shipments")

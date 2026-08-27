@@ -13,13 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * Known-bad fixture: treats a repeated confirm as a conflict.
- *
- * This is the plausible wrong answer. ConflictException already exists in this service,
- * "already confirmed" reads like a conflict, and the surrounding code uses exactly this
- * shape for duplicate creation. It is competent, idiomatic, and violates the requirement
- * the ticket states in bold. The evaluator must fail it functionally (F03), not on the
- * error contract — the envelope here is correct.
+ * REST endpoints for shipments: create, fetch, list, and confirm.
  */
 @RestController
 @RequestMapping("/shipments")

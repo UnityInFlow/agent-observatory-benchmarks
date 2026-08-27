@@ -11,25 +11,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
 /**
- * Tests the submission author wrote for BE-003 — the WEAK version.
- *
- * QUALITY VARIANT: test-quality only. The production code is character-for-character
- * identical to known-good, so behaviour, architecture and diff size are all unchanged and
- * every gate passes. These tests pass too.
- *
- * What they fail to do is the point:
- *
- *  - the repeat is never exercised. confirm is called once per test, so the one behaviour
- *    the ticket states in bold is untested; a submission that 409s on retry would still be
- *    green here
- *  - refusals assert only the status code. A submission returning Spring's default error
- *    body carries the same 404 and passes unchanged, so the service's error contract is
- *    unprotected
- *  - persistence is never verified. Nothing re-reads the shipment, so a controller that
- *    reports CONFIRMED without saving would pass
- *
- * Every one of these gaps is invisible to the evaluator: it runs the tests and they pass.
- * Only a quality rubric can see that they assert almost nothing.
+ * Tests for the confirm-shipment endpoint.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
