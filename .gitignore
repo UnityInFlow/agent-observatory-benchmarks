@@ -13,5 +13,19 @@ run*.json
 .vscode/
 *.pid
 *.swp
-.claude/
+# Note the trailing `/*` rather than `/`: git will not re-include anything inside a directory
+# it has already excluded, so `.claude/` plus `!.claude/hooks/` silently ignores the hook and
+# leaves the repo looking as though it has a reviewer it never committed.
+.claude/*
+# ...except the committed review hook. These two are TRACKED, so the evaluator's scope guard
+# sees them only when an agent actually edits them — which is a real violation and should
+# fail AC6. Everything else under .claude/ (settings.local.json, caches, whatever a daemon
+# drops there) stays ignored, so the ambient-noise reason for the rule above is intact.
+#
+# This matters because the guard's second source is `git ls-files --others
+# --exclude-standard`, which respects this file: an untracked .claude/ artifact would
+# otherwise read as an unrelated changed file and fail a run for something the agent
+# never did.
+!.claude/hooks/
+!.claude/settings.json
 .copilot/

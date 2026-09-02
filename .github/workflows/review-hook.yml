@@ -1,0 +1,41 @@
+# The review hook is code, and a reviewer that cannot be reviewed is the thing it warns about.
+#
+# Cheap and safe to run on every relevant push: `git`, `jq` and `opencode` are all stubbed,
+# so there is no network, no token and no model call. Most of the 22 cases assert the hook did
+# NOT fire — which is the half that decides whether anyone keeps it, because a hook that fires
+# on everything gets muted and a muted hook still makes the repo look reviewed.
+#
+# Path-scoped like the other two workflows: a task edit does not need to re-prove the hook.
+name: review-hook
+
+on:
+  pull_request:
+    paths:
+      - '.claude/**'
+      - '.opencode/**'
+      - '.github/workflows/review-hook.yml'
+  push:
+    branches: [main]
+    paths:
+      - '.claude/**'
+      - '.opencode/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: review-hook-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hook:
+    name: the review hook behaves
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Syntax-check the hooks
+        run: for f in .claude/hooks/*.sh; do bash -n "$f" || exit 1; done
+      - name: The review hook behaves
+        run: ./.claude/hooks/opencode-review.test.sh
