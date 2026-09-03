@@ -41,7 +41,7 @@ jobs:
       # commits a clean baseline, so it needs the files but no history.
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           java-version: '21'
           distribution: temurin
