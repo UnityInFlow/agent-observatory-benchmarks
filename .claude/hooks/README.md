@@ -8,7 +8,7 @@ reviews one person's work and silently reviews nobody else's.
 |---|---|
 | [`../settings.json`](../settings.json) | the wiring — `PostToolUse` on `Bash` |
 | [`opencode-review.sh`](opencode-review.sh) | the hook, `chmod +x` |
-| [`opencode-review.test.sh`](opencode-review.test.sh) | 22 cases with `git`, `jq` and `opencode` stubbed — no network, no tokens, no model call |
+| [`opencode-review.test.sh`](opencode-review.test.sh) | 28 cases with `git`, `jq` and `opencode` stubbed — no network, no tokens, no model call |
 | [`../../.opencode/agent/bench-critic.md`](../../.opencode/agent/bench-critic.md) | the reviewer's prompt |
 
 CI runs the test file, because a reviewer that cannot be reviewed is the thing it warns about.
@@ -19,6 +19,17 @@ On `git push` and `gh pr create`, the changed files that match the globs go to
 `bench-critic` on `ollama-cloud/glm-5.2`, and the review lands in
 `findings/opencode/review-<timestamp>.md` with a header recording the head, the base, the
 model and the agent.
+
+**The diff is inlined into the prompt rather than fetched by the reviewer**, and that is a
+fix rather than a preference. `opencode` rewrites its bash through an rtk plugin, and
+`rtk git diff` filters `.claude/`, `.opencode/`, `.github/` and `findings/` paths out of
+its output. On a branch that changes only the hook — which is every branch that touches
+this directory — the reviewer asked what had changed, was told **nothing**, and looped on
+the same command for ten minutes until it was killed, leaving no verdict. The tool never
+errored: it exited 0 with an empty answer, and empty is indistinguishable from *"no
+changes"*. Inlining removes the command, so there is nothing left for an environment to
+filter. If the hook itself cannot produce a diff for files it has already matched, it
+prints `BLOCKED` and does not spend a model call.
 
 The reviewer's first move on any evaluator is to **construct a wrong submission that this
 evaluator would pass**. CLAUDE.md states the failure in one line: *"A benchmark that cannot

@@ -134,11 +134,56 @@ out="findings/opencode/review-${stamp}.md"
 
 echo "opencode-review hook: reviewing ${#files[@]} of ${#ranked[@]} file(s) — ${AGENT} on ${MODEL}" >&2
 
-prompt="Review these changed files in agent-observatory-benchmarks. The diff is against ${base}.
+# THE REVIEWER MUST NOT HAVE TO ASK WHAT CHANGED
+#
+# This used to say "read the diff with: git diff <base>...HEAD -- <files>" and leave the
+# reviewer to run it. On 2026-09-03 that produced a review that ran for over ten minutes,
+# wrote 71k of transcript, and never reached a verdict.
+#
+# The cause was not the model. `opencode` runs its bash through an rtk rewrite plugin, and
+# `rtk git diff` filters dotfile paths out of its output — `^\.(claude|opencode|github)/`
+# and `^findings/` among them. Every file this hook reviews on a hooks-only branch lives
+# under one of those, so the reviewer asked what changed, was told NOTHING, and retried the
+# same command until it was killed.
+#
+# That is this repository's own thesis pointed at itself: the tool did not error. It
+# returned 0 and an empty answer, and empty is indistinguishable from "no changes" to
+# whoever is reading. So the diff is now INLINED — there is no command for an environment
+# to filter, and the failure cannot be written down again rather than being warned about.
+MAX_DIFF_LINES="${BENCH_REVIEW_MAX_DIFF_LINES:-1200}"
+diff_text="$(git diff "${base}...HEAD" -- "${files[@]}" 2>/dev/null || true)"
+diff_lines="$(printf '%s\n' "$diff_text" | wc -l | tr -d ' ')"
+
+# A diff the hook could not produce is the same silent-empty failure one layer up, so it is
+# named rather than passed off as an empty review.
+if [ -z "$diff_text" ]; then
+  echo "opencode-review hook: BLOCKED — ${#files[@]} file(s) matched but the diff came back empty." >&2
+  echo "  That is a harness fault, not a clean branch. Not calling the reviewer." >&2
+  echo "**BLOCKED — the hook could not produce a diff for the matched files. No review ran.**" >> "$out"
+  exit 0
+fi
+
+diff_note=""
+if [ "$diff_lines" -gt "$MAX_DIFF_LINES" ]; then
+  diff_text="$(printf '%s\n' "$diff_text" | awk -v n="$MAX_DIFF_LINES" 'NR<=n')"
+  diff_note="
+
+[TRUNCATED at ${MAX_DIFF_LINES} of ${diff_lines} diff lines. Read the files on disk for the
+rest, and say in your review which parts you read that way.]"
+fi
+
+prompt="Review these changed files in agent-observatory-benchmarks, diffed against ${base}.
 
 $(printf -- '- %s\n' "${files[@]}")
 
-Read them, and read the diff with: git diff ${base}...HEAD -- $(printf '%s ' "${files[@]}")
+The diff is inlined below. Do not run git to fetch it: this shell filters dotfile paths out
+of git output, so 'git diff ${base}...HEAD -- .' returns EMPTY here even though the files
+above changed. A previous review read that emptiness as 'nothing changed' and looped until
+it was killed. Read the files on disk if you want more context than the diff gives.
+
+--- BEGIN DIFF ---
+${diff_text}
+--- END DIFF ---${diff_note}
 
 End with a line 'VERDICT: ACCEPT' or 'VERDICT: REJECT' and one sentence of reason."
 
