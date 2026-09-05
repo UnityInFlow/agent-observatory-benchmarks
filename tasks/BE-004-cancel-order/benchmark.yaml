@@ -1,0 +1,65 @@
+id: BE-004
+name: cancel-order
+category: feature
+prompt_file: task.md
+repository: sample-service
+evaluator: evaluator.sh
+evaluator_version: 1.0.0
+# Why this benchmark exists: BE-003 is a three-file change inside one package that a
+# capable model passes 10 of 10 on, with two of the rubric's four categories at zero
+# variance across both arms of a 20-run batch and the changed-file count at its floor.
+# Track B's B5 (workflow phases) and B7 (verification + policies) claim to prevent
+# premature coding and false completion, and on BE-003 there is nothing to prevent. This
+# task is the first one where an agent that codes before it reads can be told apart from
+# one that does not.
+#
+# It crosses a module boundary in both directions — cancelling an order touches its
+# shipments, and creating a shipment must consult its order — so "which package owns the
+# rule" is a real design decision with more than one defensible answer, and scope
+# discipline can actually fail. It has two independent traps:
+#
+#   atomicity    a cancel blocked by a CONFIRMED shipment must leave every shipment as it
+#                was. The natural first draft iterates the order's shipments, cancelling
+#                CREATED ones and throwing on the first CONFIRMED one — and has already
+#                cancelled whatever sorted before it. The functional suite sets that
+#                order up deliberately. Check-then-act, not act-then-check.
+#   guard        a CANCELLED order refuses new shipments. It is stated in the ticket as a
+#                consequence, not as an endpoint, in a controller the ticket's title does
+#                not name. An agent that implements "cancel" and stops has missed it.
+#
+# And the contract trap BE-002 and BE-003 carry: the 404 and the two 409s must travel
+# through the ApiError envelope, which the ticket does not restate.
+#
+# The functional and contract verdicts are split as in BE-003: a submission can pass one
+# and fail the other, and they fail for different reasons.
+expected:
+  build: true
+  tests: true
+  forbidden_new_dependencies: true
+  max_unrelated_files: 0
+acceptance_criteria:
+  - id: AC1
+    description: Existing build passes
+    check: maven_build
+  - id: AC2
+    description: Existing tests pass
+    check: maven_test
+  - id: AC3
+    description: Cancelling an active order returns 200, persists CANCELLED and cascades to its CREATED shipments
+    check: functional_suite
+  - id: AC4
+    description: Error responses use the service's ApiError envelope
+    check: contract_suite
+  - id: AC5
+    description: A repeat succeeds; a blocked cancel changes nothing; an unknown order is 404; a shipment for a cancelled order is 409
+    check: functional_suite
+  - id: AC6
+    description: No new Maven dependency
+    check: dependency_guard
+  - id: AC7
+    description: No unrelated production file changes
+    check: scope_guard
+allowed_production_prefixes:
+  - sample-service/src/main/kotlin/com/unityinflow/sample/order/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/shipment/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/api/
