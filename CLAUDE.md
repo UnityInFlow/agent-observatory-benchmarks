@@ -67,6 +67,28 @@ persistence.
 `known-bad-repeat-conflict` and `known-bad-default-error` are evaluator test cases, not rubric
 inputs — they fail the gates by design and are never in a quality rubric's scored population.
 
+## BE-004 fixtures
+
+The first task that cannot be solved inside one package. `known-good` is **five files across
+three packages** — the order status, `cancel`, a repository query, the shipment-side guard,
+two error codes — and every variant is a complete five-file submission that differs from it on
+exactly one dimension: `good-inline-envelope`, `good-nested-ifs`, `good-noisy-diff`,
+`good-strong-tests` / `good-weak-tests`, the same five dimensions as BE-003.
+
+Three known-bad fixtures, each overlaid on `known-good` and each an evaluator test case:
+
+- `known-bad-partial-cascade` — cancels shipments while iterating and throws on the first
+  `CONFIRMED` one, so the `CREATED` shipment that sorted before it is already gone when the
+  409 goes out. **Must return 12, never 13**: its envelope is correct and its state is wrong.
+  This is the trap the task exists for.
+- `known-bad-no-shipment-guard` — the baseline shipment controller: `cancel` is complete and
+  a cancelled order still takes shipments. Registered on its own so either half of AC5 can
+  regress visibly.
+- `known-bad-default-error` — right statuses, Spring's default body, in both controllers.
+
+`good-weak-tests` would pass `known-bad-partial-cascade` unchanged: it never reads state after
+the refusal. That gap is the point of the test-quality pair here.
+
 ## Dependabot must not watch sample-service
 
 The fixture is the thing under test. Its Spring Boot and Kotlin versions are **part of the
