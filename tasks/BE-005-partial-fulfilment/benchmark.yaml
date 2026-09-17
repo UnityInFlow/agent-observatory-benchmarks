@@ -1,0 +1,72 @@
+id: BE-005
+name: partial-fulfilment
+category: feature
+prompt_file: task.md
+repository: sample-service
+evaluator: evaluator.sh
+evaluator_version: 1.0.0
+# Why this benchmark exists: BE-004 is six files that the pinned model passes every time —
+# 54 of 54 runs across three Track B stops exited 0 — and at file granularity it has almost
+# no design variance. Author decision 11 registers a multi-agent decomposition step (B8a)
+# and needs a task with MORE implementation than BE-004: enough independent work that a
+# pipeline has something to divide, and a design fork built in from the first sentence so
+# that a planner who reads before typing can be told apart from one who does not.
+#
+# This is an epic of three parts on one branch:
+#
+#   part 1  partial fulfilment — a new feature with the trap. An order's quantity is
+#           allocated across shipments and its fulfilment is reported on read. The early
+#           clause invites a STORED fulfilment field on the order, written from the
+#           shipment side at each transition; the late clause — a cancelled shipment
+#           releases its quantity and the status moves back DOWN — is free under a DERIVED
+#           read model and is the one write site a stored shape has to get right in the
+#           direction no other site exercises. The functional suite executes on it.
+#   part 2  an order needs its customer — an UPDATE to existing behaviour that breaks the
+#           baseline OrderControllerTest, which the ticket tells the agent to change and
+#           AC2 exempts by name (baseline_tests_expected_to_change).
+#   part 3  paged lists — the same limit/offset contract in three controllers, with the
+#           array body unchanged so unpaged callers, the baseline tests included, keep
+#           working. An envelope body is the plausible over-reach, and AC2 catches it.
+#
+# And the contract trap BE-002 through BE-004 carry, in seven new places: every refusal
+# must travel through the ApiError envelope, which the ticket does not restate except for
+# the two it changes.
+#
+# The functional and contract verdicts are split as in BE-004; the functional verdict is
+# the conjunction of one suite per part, and evaluation.json says which part failed.
+expected:
+  build: true
+  tests: true
+  forbidden_new_dependencies: true
+  max_unrelated_files: 0
+acceptance_criteria:
+  - id: AC1
+    description: Existing build passes
+    check: maven_build
+  - id: AC2
+    description: Existing tests pass, other than OrderControllerTest, which the ticket changes
+    check: maven_test
+  - id: AC3
+    description: Quantities, allocation, transitions, the fulfilment read model, the filter, and the release of a cancelled shipment's quantity
+    check: functional_suite
+  - id: AC4
+    description: Error responses use the service's ApiError envelope
+    check: contract_suite
+  - id: AC5
+    description: An order for an unknown customer is refused; every list pages as specified and unpaged calls are unchanged
+    check: functional_suite
+  - id: AC6
+    description: No new Maven dependency
+    check: dependency_guard
+  - id: AC7
+    description: No unrelated production file changes
+    check: scope_guard
+allowed_production_prefixes:
+  - sample-service/src/main/kotlin/com/unityinflow/sample/order/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/shipment/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/customer/
+  - sample-service/src/main/kotlin/com/unityinflow/sample/api/
+# Baseline test classes AC2 does not run for this task, because the ticket changes the
+# behaviour they assert. Named here and in evaluator.sh; reported in evaluation.json.
+baseline_tests_expected_to_change:
+  - sample-service/src/test/kotlin/com/unityinflow/sample/order/OrderControllerTest.kt
