@@ -178,7 +178,7 @@ purge_acceptance_artifacts() {
 # exemption), so the class compiled from the agent's tree would run against the baseline
 # tree and fail AC2 for every correct submission. Wherever the test source set is about to
 # change, the compiled set is dropped with it; the recompile costs seconds.
-purge_compiled_tests() { rm -rf "${SERVICE_DIR}/target/test-classes"; }
+purge_compiled_tests() { rm -rf "${SERVICE_DIR}/target/test-classes" "${SERVICE_DIR}/target/surefire-reports"; }
 purge_acceptance_artifacts
 
 # ---------------------------------------------------------------------------
@@ -263,12 +263,33 @@ log "    agent's own tests" "$(
 cleanup() { purge_acceptance_artifacts; restore_agent_tests; }
 trap cleanup EXIT
 
-run_suite() {
-  # $1 = suite class. All four are compiled together — Kotlin compiles the whole test
-  # source set — so they are copied in together and selected one at a time by -Dtest.
+run_suites() {
+  # $1 = comma-separated suite classes, $2 = log name. All four are compiled together —
+  # Kotlin compiles the whole test source set — so they are copied in together and
+  # selected by -Dtest. The three functional suites run in ONE invocation, because every
+  # Maven start costs more than the suites do, and the per-suite verdict is read back from
+  # the surefire report each suite writes.
   (cd "$SERVICE_DIR" && ./mvnw -B -q test \
       -Dtest="$1" -Dsurefire.failIfNoSpecifiedTests=false \
-      >"/tmp/be005-$1.log" 2>&1)
+      >"/tmp/be005-$2.log" 2>&1)
+}
+
+suite_passed() {
+  # $1 = suite class. True only when its surefire report exists, ran at least one test and
+  # recorded neither failures nor errors. A missing report — the run did not compile, or
+  # the suite was not selected — is a fail, never a pass.
+  local xml="${SERVICE_DIR}/target/surefire-reports/TEST-com.unityinflow.sample.$1.xml"
+  [[ -f "$xml" ]] || { echo false; return; }
+  local header tests failures errors
+  header="$(grep -m1 -oE '<testsuite [^>]*>' "$xml")"
+  tests="$(sed -nE 's/.* tests="([0-9]+)".*/\1/p' <<<"$header")"
+  failures="$(sed -nE 's/.* failures="([0-9]+)".*/\1/p' <<<"$header")"
+  errors="$(sed -nE 's/.* errors="([0-9]+)".*/\1/p' <<<"$header")"
+  if [[ "${tests:-0}" -gt 0 && "${failures:-1}" -eq 0 && "${errors:-1}" -eq 0 ]]; then
+    echo true
+  else
+    echo false
+  fi
 }
 
 FULFILMENT_PASSED=false
@@ -283,9 +304,11 @@ if [[ $BUILD_PASSED == true ]]; then
       || die "acceptance suite missing: ${s}.kt"
   done
 
-  run_suite BE005FulfilmentTest   && FULFILMENT_PASSED=true
-  run_suite BE005CustomerRuleTest && CUSTOMER_RULE_PASSED=true
-  run_suite BE005PaginationTest   && PAGINATION_PASSED=true
+  purge_compiled_tests
+  run_suites "BE005FulfilmentTest,BE005CustomerRuleTest,BE005PaginationTest" functional || true
+  FULFILMENT_PASSED="$(suite_passed BE005FulfilmentTest)"
+  CUSTOMER_RULE_PASSED="$(suite_passed BE005CustomerRuleTest)"
+  PAGINATION_PASSED="$(suite_passed BE005PaginationTest)"
   if [[ $FULFILMENT_PASSED == true && $CUSTOMER_RULE_PASSED == true && $PAGINATION_PASSED == true ]]; then
     FUNCTIONAL_PASSED=true
   fi
@@ -293,7 +316,7 @@ if [[ $BUILD_PASSED == true ]]; then
   # The contract verdict is only meaningful once the behaviour is right: if nothing
   # refuses anything there is no error response to judge the shape of.
   if [[ $FUNCTIONAL_PASSED == true ]]; then
-    run_suite BE005ContractTest && CONTRACT_PASSED=true
+    run_suites BE005ContractTest contract && CONTRACT_PASSED=true
   fi
   cleanup
 fi

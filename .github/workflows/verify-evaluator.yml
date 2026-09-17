@@ -6,8 +6,11 @@
 # test tripped AC2 and masked the error-contract verdict that case exists to prove. Nothing
 # would have caught that automatically before this workflow.
 #
-# Slow on purpose — each verification builds and runs the suite six times — so it is scoped
-# by path rather than run on every push.
+# Slow on purpose — each verification builds and runs the suite many times — so it is scoped
+# by path rather than run on every push, and since BE-005 it runs ONE JOB PER BENCHMARK:
+# five benchmarks in sequence on one runner passed the 30-minute limit on BE-005's first PR
+# (benchmarks#30). The benchmarks are discovered from tasks/, so a new task needs no edit
+# here, and the required check keeps its name through the aggregate job at the bottom.
 name: verify-evaluator
 
 on:
@@ -32,10 +35,30 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: every evaluator discriminates
+  discover:
+    name: list the benchmarks
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      benches: ${{ steps.list.outputs.benches }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: list
+        # Every directory under tasks/ that carries a verifier is a benchmark.
+        run: |
+          benches="$(for d in tasks/*/; do [ -x "$d/verify-evaluator.sh" ] && basename "$d"; done | jq -R . | jq -sc .)"
+          echo "benches=$benches" >> "$GITHUB_OUTPUT"
+          echo "discovered: $benches"
+
+  verify:
+    name: verify ${{ matrix.bench }}
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        bench: ${{ fromJSON(needs.discover.outputs.benches) }}
     steps:
       # verify-evaluator.sh stages its own throwaway git repo from the working tree and
       # commits a clean baseline, so it needs the files but no history.
@@ -47,8 +70,8 @@ jobs:
           distribution: temurin
           cache: maven
 
-      - name: Verify every benchmark
-        run: make verify-all
+      - name: Verify ${{ matrix.bench }}
+        run: make verify-evaluator BENCH=${{ matrix.bench }}
 
       # The evaluator writes evaluation.json per case. On failure these say which acceptance
       # criterion flipped, which is the difference between "CI is red" and knowing why.
@@ -56,9 +79,25 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: evaluation-json
+          name: evaluation-json-${{ matrix.bench }}
           path: |
             **/evaluation.json
             /tmp/be00*.log
           if-no-files-found: ignore
           retention-days: 14
+
+  # The required status check on main. It carries the name the branch protection expects
+  # and fails if any benchmark's job did anything but succeed — a cancelled or skipped
+  # matrix job is a red check, never a quiet pass.
+  aggregate:
+    name: every evaluator discriminates
+    needs: [discover, verify]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Every benchmark verified
+        run: |
+          echo "discover: ${{ needs.discover.result }}"
+          echo "verify:   ${{ needs.verify.result }}"
+          [ "${{ needs.discover.result }}" = "success" ] && [ "${{ needs.verify.result }}" = "success" ]
