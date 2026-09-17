@@ -9,6 +9,9 @@ import com.unityinflow.sample.api.UnprocessableEntityException
 import com.unityinflow.sample.api.ValidationException
 import com.unityinflow.sample.api.page
 import com.unityinflow.sample.customer.InMemoryCustomerRepository
+import com.unityinflow.sample.shipment.InMemoryShipmentRepository
+import com.unityinflow.sample.shipment.allocatedQuantity
+import com.unityinflow.sample.shipment.deliveredQuantity
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
@@ -25,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController
 class OrderController(
     private val repository: InMemoryOrderRepository,
     private val customers: InMemoryCustomerRepository,
+    private val shipments: InMemoryShipmentRepository,
 ) {
 
     @PostMapping
@@ -56,7 +60,7 @@ class OrderController(
 
     @GetMapping("/{orderId}")
     fun getById(@PathVariable orderId: String): Order =
-        repository.findById(orderId)
+        repository.findById(orderId)?.withFulfilment()
             ?: throw ResourceNotFoundException(
                 ErrorCode.ORDER_NOT_FOUND,
                 "No order with id '$orderId'",
@@ -69,14 +73,17 @@ class OrderController(
         @RequestParam(required = false) offset: Int?,
     ): ResponseEntity<List<Order>> {
         val wanted = fulfilment?.let { parseFulfilmentStatus(it) }
+        // The filter reads the field on the order; nothing updates it after create.
         return repository.findAll()
             .filter { wanted == null || it.fulfilment.status == wanted }
+            .map { it.withFulfilment() }
             .page(PageQuery.of(limit, offset))
     }
 
     /**
-     * The order's quantity can change after shipments exist. The stored fulfilment is
-     * re-derived against the new quantity here — the fourth write site.
+     * The order's quantity can change after shipments exist. Fulfilment is not stored, so
+     * nothing here has to be recomputed: the next read compares the shipments against the
+     * new quantity, and the allocation guard does the same.
      */
     @PutMapping("/{orderId}/quantity")
     fun amendQuantity(@PathVariable orderId: String, @RequestBody request: AmendQuantityRequest): Order {
@@ -91,15 +98,14 @@ class OrderController(
                 ErrorCode.ORDER_NOT_FOUND,
                 "No order with id '$orderId'",
             )
-        if (request.quantity < order.fulfilment.allocated) {
+        val allocated = shipments.findByOrderId(orderId).allocatedQuantity()
+        if (request.quantity < allocated) {
             throw ConflictException(
                 ErrorCode.ORDER_QUANTITY_BELOW_ALLOCATED,
-                "Order '$orderId' has ${order.fulfilment.allocated} allocated; its quantity cannot be reduced to ${request.quantity}",
+                "Order '$orderId' has $allocated allocated; its quantity cannot be reduced to ${request.quantity}",
             )
         }
-        return repository.save(
-            order.copy(quantity = request.quantity, fulfilment = order.fulfilment.updated(request.quantity)),
-        )
+        return repository.save(order.copy(quantity = request.quantity)).withFulfilment()
     }
 
     private fun parseFulfilmentStatus(value: String): FulfilmentStatus =
@@ -108,4 +114,18 @@ class OrderController(
                 "Unknown fulfilment status '$value'",
                 listOf(FieldViolation("fulfilment", "must be one of ${FulfilmentStatus.entries.joinToString()}")),
             )
+
+    /** Fills in the order's fulfilment from its shipments for the response. */
+    private fun Order.withFulfilment(): Order {
+        val related = shipments.findByOrderId(orderId)
+        val allocated = related.allocatedQuantity()
+        val delivered = related.deliveredQuantity()
+        val status = when {
+            delivered >= quantity -> FulfilmentStatus.DELIVERED
+            allocated >= quantity -> FulfilmentStatus.FULLY_ALLOCATED
+            allocated == 0 -> FulfilmentStatus.UNALLOCATED
+            else -> FulfilmentStatus.PARTIALLY_ALLOCATED
+        }
+        return copy(fulfilment = Fulfilment(allocated, delivered, status))
+    }
 }

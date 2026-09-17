@@ -14,6 +14,7 @@ data class Order(
     val amount: BigDecimal,
     val currency: String,
     val quantity: Int = 1,
+    val fulfilment: Fulfilment = Fulfilment(0, 0, FulfilmentStatus.UNALLOCATED),
 )
 
 data class CreateOrderRequest(
@@ -32,13 +33,7 @@ data class AmendQuantityRequest(
     val quantity: Int = 0,
 )
 
-/**
- * How much of an order's quantity its shipments account for.
- *
- * Not stored: it is a view over the order's shipments, computed when the order is read,
- * so it is always consistent with them and no shipment transition has to remember to
- * update it.
- */
+/** How much of an order's quantity its shipments account for. */
 data class Fulfilment(
     val allocated: Int,
     val delivered: Int,
@@ -51,13 +46,3 @@ enum class FulfilmentStatus {
     FULLY_ALLOCATED,
     DELIVERED,
 }
-
-/** An order as the API reports it: the stored order plus its fulfilment. */
-data class OrderResponse(
-    val orderId: String,
-    val customerId: String,
-    val amount: BigDecimal,
-    val currency: String,
-    val quantity: Int,
-    val fulfilment: Fulfilment,
-)

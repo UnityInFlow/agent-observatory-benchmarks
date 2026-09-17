@@ -26,7 +26,9 @@ cannot.
  - `order/OrderController.kt` is where the design decision of the task lives: **fulfilment is
    derived, in one function, from the shipment repository at read time.** Nothing is stored,
    so no shipment transition has to remember to update it — a cancelled shipment releases
-   its quantity by being `CANCELLED`. The customer check and the filter live here too.
+   its quantity by being `CANCELLED`, and an amended quantity (`PUT /orders/{orderId}/quantity`,
+   the clause added after the first Gate B) changes the status on the next read with no
+   recomputation anywhere. The customer check and the filter live here too.
  - `shipment/Shipment.kt` gains `quantity`, `DELIVERED`, and the two sums the order side and
    the allocation guard share.
  - `shipment/ShipmentRepository.kt` gains `findByOrderId`, the shape the repositories already
