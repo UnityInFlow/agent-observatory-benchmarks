@@ -26,5 +26,6 @@ when it did not store — a second owner of the fact that nobody maintains — a
 amendment clause was written to make visible: any read path that trusts an order-side copy is
 wrong the moment the quantity moves without a shipment event.
 
-Dies on `the list filters by fulfilment status`; passes every other fulfilment case, including
-the amendment cases, whose reads derive. Exit 12, envelope correct.
+Dies on `the list filters by fulfilment status` and nothing else — measured from the surefire
+report, 1 failure of 18; the amendment cases pass because their reads derive. Exit 12, envelope
+correct.

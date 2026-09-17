@@ -22,11 +22,13 @@ that one of them changes the order.
 
 This is the plausible wrong answer, and it is the reason BE-005 exists. It passes every
 fulfilment case up to the late clause — quantities, defaults, allocation, over-allocation,
-all three transitions, delivered counts, the filter, and the quantity amendment (written here
-with the stored status re-derived, so that this fixture still dies only at the cancel) — and
-the customer rule, pagination and contract suites in full. It dies on `cancelling a shipment releases its quantity` (the status
-stays `FULLY_ALLOCATED` and the reallocation is refused with 409) and on `a cancelled
-shipment never counts`.
+all three transitions, delivered counts, the filter — and the customer rule, pagination and
+contract suites in full. The quantity amendment is written here with the stored status
+re-derived, so the amendment itself is not what kills it. It dies on the three cases that read fulfilment after a cancel:
+`cancelling a shipment releases its quantity` (the status stays `FULLY_ALLOCATED` and the
+reallocation is refused with 409), `a cancelled shipment never counts`, and `amending the
+quantity moves the status in both directions`, which cancels a shipment midway — measured
+from the surefire report, 3 failures of 18, all three cancel-related.
 
 The evaluator must fail it functionally (exit 12, F03), not on the error contract: the
 envelope here is correct. If this case ever returns 13, the evaluator has misattributed a

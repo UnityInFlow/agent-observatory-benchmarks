@@ -22,8 +22,12 @@ here. What nobody wrote is the fourth site, the one in the *order* package: the 
 quantity changed, the counts did not, and the status that was derived from the old quantity is
 now wrong. `FULLY_ALLOCATED` at 4 stays `FULLY_ALLOCATED` at 6.
 
-It passes every fulfilment case up to `amending the quantity moves the status in both
-directions` and dies there; the customer rule, pagination and contract suites pass in full.
+It dies on exactly the two cases that read fulfilment after an amendment — `amending the
+quantity moves the status in both directions` and `an amendment below the allocated quantity
+is refused and nothing changes` (whose last step lowers the quantity to exactly the allocated
+total and expects `FULLY_ALLOCATED`) — measured from the surefire report, 2 failures of 18. Every
+other fulfilment case, the cancel release included, passes, as do the customer rule, pagination
+and contract suites.
 **Must return 12, never 13**: the envelope is correct. If it ever returns 0, the fulfilment suite
 has stopped reading fulfilment after a change the shipment side did not make, and the amendment
 clause is no longer a discriminator.
