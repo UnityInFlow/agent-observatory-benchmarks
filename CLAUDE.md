@@ -94,7 +94,9 @@ the refusal. That gap is the point of the test-quality pair here.
 The first task that is an epic: three parts on one branch, four packages, `known-good` is
 **nine files**. Part 1 (partial fulfilment) carries the design fork — fulfilment **derived**
 from the shipments at read time, against a **stored** field written from the shipment side —
-and the late clause that executes on it: a cancelled shipment releases its quantity. Part 2
+and two late clauses that execute on it: a cancelled shipment releases its quantity, and an
+order's quantity can be amended with no shipment event (added after the first Gate B, where
+two of five plain runs stored and two derived but trusted a placeholder field). Part 2
 (an order needs its customer) is an update to existing behaviour; **AC2 exempts the baseline
 `OrderControllerTest` by name** (`baseline_tests_expected_to_change` in `benchmark.yaml`) and
 reports the exemption in `evaluation.json`. Part 3 (paged lists) is the same contract in
@@ -105,14 +107,19 @@ part named in `evaluation.json`, and one contract suite (exit 13).
 
 Six gate-passing quality variants, each a complete submission differing from `known-good` on
 one dimension: the five from BE-003 and BE-004, plus **`good-stored-consistent`** — the wrong
-shape done right at all three write sites. The evaluator passes it (exit 0) and must; it
+shape done right at all four write sites. The evaluator passes it (exit 0) and must; it
 exists so a rubric can be proved able to see the shape when the exit code cannot.
 
-Five known-bad fixtures, each overlaid on `known-good` and each an evaluator test case:
+Seven known-bad fixtures, each overlaid on `known-good` and each an evaluator test case:
 
 - `known-bad-stale-status` — stored fulfilment written at create and deliver, forgotten at
   cancel. Passes every case up to the late clause. **Must return 12, never 13.** This is the
   trap the task exists for.
+- `known-bad-stale-amend` — the stored shape right at all three shipment sites, stale after a
+  quantity amendment: the fourth write site, in the order package, was never written. **Must
+  return 12, never 13.**
+- `known-bad-placeholder-filter` — derived reads, but the list filter runs over a placeholder
+  field on the order that nothing updates. The shape two Gate B runs reached for.
 - `known-bad-save-then-check` — the refused shipment is stored before the 409 goes out.
 - `known-bad-no-customer-rule` — parts 1 and 3 done, part 2 never attempted.
 - `known-bad-envelope-breaks-list` — pagination as a JSON envelope. The baseline list tests

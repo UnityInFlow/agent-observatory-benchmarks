@@ -12,6 +12,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
@@ -29,6 +30,12 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
  * here — create, confirm, deliver, over-allocation — and dies on this one if the cancel
  * site was missed or does not move the status back down. The ticket states the release in
  * one sentence, last.
+ *
+ * The amendment clause is the second discriminator, added after Gate B on the first
+ * ticket: `amending the quantity moves the status in both directions` changes fulfilment
+ * with NO shipment event. A stored copy that is kept in step from the shipment side, and a
+ * placeholder field that some read path trusts, both answer with the old status; a derived
+ * read cannot.
  *
  * Response *shape* is checked separately by BE005ContractTest.
  */
@@ -73,6 +80,11 @@ class BE005FulfilmentTest {
         post("/shipments")
             .contentType(MediaType.APPLICATION_JSON)
             .content("""{"shipmentId":"$shipmentId","orderId":"$orderId","carrier":"DHL"}""")
+
+    private fun amend(orderId: String, quantity: Int) =
+        put("/orders/$orderId/quantity")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"quantity":$quantity}""")
 
     private fun confirm(shipmentId: String) = post("/shipments/$shipmentId/confirm")
     private fun deliver(shipmentId: String) = post("/shipments/$shipmentId/deliver")
@@ -311,5 +323,70 @@ class BE005FulfilmentTest {
             .andExpect(jsonPath("$[0].orderId").value("O-13"))
             .andExpect(jsonPath("$[0].fulfilment.allocated").value(1))
             .andExpect(jsonPath("$[0].fulfilment.status").value("PARTIALLY_ALLOCATED"))
+    }
+
+    // ---- the amendment clause ---------------------------------------------------------
+
+    @Test
+    fun `amending the quantity moves the status in both directions`() {
+        mockMvc.perform(createOrder("O-14", 4)).andExpect(status().isCreated)
+        mockMvc.perform(createShipment("S-14a", "O-14", 2)).andExpect(status().isCreated)
+        mockMvc.perform(createShipment("S-14b", "O-14", 2)).andExpect(status().isCreated)
+        expectFulfilment("O-14", 4, 0, "FULLY_ALLOCATED")
+
+        // Raising the quantity moves the status back DOWN with no shipment event at all.
+        mockMvc.perform(amend("O-14", 6))
+            .andExpect(status().isOk)
+            .andExpect(jsonPath("$.quantity").value(6))
+            .andExpect(jsonPath("$.fulfilment.status").value("PARTIALLY_ALLOCATED"))
+        mockMvc.perform(get("/orders/O-14")).andExpect(jsonPath("$.quantity").value(6))
+        expectFulfilment("O-14", 4, 0, "PARTIALLY_ALLOCATED")
+
+        // The allocation guard reads the amended quantity.
+        mockMvc.perform(createShipment("S-14c", "O-14", 2)).andExpect(status().isCreated)
+        expectFulfilment("O-14", 6, 0, "FULLY_ALLOCATED")
+        mockMvc.perform(cancel("S-14c")).andExpect(status().isOk)
+        expectFulfilment("O-14", 4, 0, "PARTIALLY_ALLOCATED")
+
+        // Lowering to exactly the allocated quantity fills the order again.
+        mockMvc.perform(amend("O-14", 4)).andExpect(status().isOk)
+        expectFulfilment("O-14", 4, 0, "FULLY_ALLOCATED")
+
+        // And the same in the delivered direction.
+        mockMvc.perform(confirm("S-14a")).andExpect(status().isOk)
+        mockMvc.perform(deliver("S-14a")).andExpect(status().isOk)
+        mockMvc.perform(confirm("S-14b")).andExpect(status().isOk)
+        mockMvc.perform(deliver("S-14b")).andExpect(status().isOk)
+        expectFulfilment("O-14", 4, 4, "DELIVERED")
+        mockMvc.perform(amend("O-14", 5)).andExpect(status().isOk)
+        expectFulfilment("O-14", 4, 4, "PARTIALLY_ALLOCATED")
+        mockMvc.perform(amend("O-14", 4)).andExpect(status().isOk)
+        expectFulfilment("O-14", 4, 4, "DELIVERED")
+    }
+
+    @Test
+    fun `an amendment below the allocated quantity is refused and nothing changes`() {
+        mockMvc.perform(createOrder("O-15", 5)).andExpect(status().isCreated)
+        mockMvc.perform(createShipment("S-15", "O-15", 3)).andExpect(status().isCreated)
+
+        mockMvc.perform(amend("O-15", 2)).andExpect(status().isConflict)
+        mockMvc.perform(get("/orders/O-15")).andExpect(jsonPath("$.quantity").value(5))
+        expectFulfilment("O-15", 3, 0, "PARTIALLY_ALLOCATED")
+
+        // Exactly the allocated quantity is allowed.
+        mockMvc.perform(amend("O-15", 3)).andExpect(status().isOk)
+        expectFulfilment("O-15", 3, 0, "FULLY_ALLOCATED")
+    }
+
+    @Test
+    fun `a non-positive amendment is refused and nothing changes`() {
+        mockMvc.perform(createOrder("O-16", 3)).andExpect(status().isCreated)
+        mockMvc.perform(amend("O-16", 0)).andExpect(status().isBadRequest)
+        mockMvc.perform(get("/orders/O-16")).andExpect(jsonPath("$.quantity").value(3))
+    }
+
+    @Test
+    fun `amending an unknown order returns 404`() {
+        mockMvc.perform(amend("O-missing", 3)).andExpect(status().isNotFound)
     }
 }

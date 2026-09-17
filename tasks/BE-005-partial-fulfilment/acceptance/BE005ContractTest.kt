@@ -12,6 +12,7 @@ import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
@@ -21,7 +22,8 @@ import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
  * Run only after the three functional suites pass: if nothing refuses anything, there is
  * no error response whose shape could be judged.
  *
- * Same trap as BE-002 through BE-004, now in seven new places across three packages.
+ * Same trap as BE-002 through BE-004, now in seven new places across three packages, plus
+ * the three refusals the quantity amendment adds.
  * `ResponseStatusException`, `ResponseEntity.status(...).build()` and Spring's own binding
  * errors all produce the right status through the framework's default body, whose shape is
  * `{timestamp, status, error, path}` — no `error.code`. This service answers with `ApiError`
@@ -65,6 +67,11 @@ class BE005ContractTest {
         post("/shipments")
             .contentType(MediaType.APPLICATION_JSON)
             .content("""{"shipmentId":"$shipmentId","orderId":"$orderId","carrier":"DHL","quantity":$quantity}""")
+
+    private fun amend(orderId: String, quantity: Int) =
+        put("/orders/$orderId/quantity")
+            .contentType(MediaType.APPLICATION_JSON)
+            .content("""{"quantity":$quantity}""")
 
     @Test
     fun `an unknown customer on order creation is reported through the error envelope`() {
@@ -152,5 +159,35 @@ class BE005ContractTest {
             .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
             .andExpect(jsonPath("$.error.fields[0].field").value("fulfilment"))
             .andExpect(jsonPath("$.path").doesNotExist())
+    }
+
+    @Test
+    fun `an amendment below the allocated quantity is reported through the error envelope`() {
+        mockMvc.perform(createOrder("O-5", quantity = 2)).andExpect(status().isCreated)
+        mockMvc.perform(createShipment("S-5", "O-5", 2)).andExpect(status().isCreated)
+
+        mockMvc.perform(amend("O-5", 1))
+            .andExpect(status().isConflict)
+            .andExpect(jsonPath("$.error").exists())
+            .andExpect(jsonPath("$.error.code").isNotEmpty)
+            .andExpect(jsonPath("$.error.message").isNotEmpty)
+            .andExpect(jsonPath("$.timestamp").doesNotExist())
+    }
+
+    @Test
+    fun `a non-positive amendment is a validation failure naming the field`() {
+        mockMvc.perform(createOrder("O-6", quantity = 2)).andExpect(status().isCreated)
+        mockMvc.perform(amend("O-6", 0))
+            .andExpect(status().isBadRequest)
+            .andExpect(jsonPath("$.error.code").value("VALIDATION_FAILED"))
+            .andExpect(jsonPath("$.error.fields[0].field").value("quantity"))
+    }
+
+    @Test
+    fun `an amendment of an unknown order uses the existing not-found code`() {
+        mockMvc.perform(amend("O-missing", 3))
+            .andExpect(status().isNotFound)
+            .andExpect(jsonPath("$.error.code").value("ORDER_NOT_FOUND"))
+            .andExpect(jsonPath("$.error.message").isNotEmpty)
     }
 }

@@ -18,6 +18,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -86,6 +87,34 @@ class OrderController(
             .map { it.withFulfilment() }
             .filter { wanted == null || it.fulfilment.status == wanted }
             .page(PageQuery.of(limit, offset))
+    }
+
+    /**
+     * The order's quantity can change after shipments exist. Fulfilment is not stored, so
+     * nothing here has to be recomputed: the next read compares the shipments against the
+     * new quantity, and the allocation guard does the same.
+     */
+    @PutMapping("/{orderId}/quantity")
+    fun amendQuantity(@PathVariable orderId: String, @RequestBody request: AmendQuantityRequest): OrderResponse {
+        if (request.quantity < 1) {
+            throw ValidationException(
+                "Order quantity must be positive",
+                listOf(FieldViolation("quantity", "must be at least 1")),
+            )
+        }
+        val order = repository.findById(orderId)
+            ?: throw ResourceNotFoundException(
+                ErrorCode.ORDER_NOT_FOUND,
+                "No order with id '$orderId'",
+            )
+        val allocated = shipments.findByOrderId(orderId).allocatedQuantity()
+        if (request.quantity < allocated) {
+            throw ConflictException(
+                ErrorCode.ORDER_QUANTITY_BELOW_ALLOCATED,
+                "Order '$orderId' has $allocated allocated; its quantity cannot be reduced to ${request.quantity}",
+            )
+        }
+        return repository.save(order.copy(quantity = request.quantity)).withFulfilment()
     }
 
     private fun parseFulfilmentStatus(value: String): FulfilmentStatus =

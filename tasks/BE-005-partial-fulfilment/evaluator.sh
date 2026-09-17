@@ -9,7 +9,8 @@
 # BE-005 is an epic of three parts on one branch, and the functional verdict is the
 # conjunction of three evaluator-owned suites, one per part:
 #   fulfilment    part 1 — quantities, allocation, the three transitions, the read model,
-#                 the filter, and the late clause: a cancelled shipment releases its quantity
+#                 the filter, and two late clauses: a cancelled shipment releases its
+#                 quantity, and an order's quantity can be amended with no shipment event
 #   customerRule  part 2 — an order needs an existing customer (an UPDATE to baseline behaviour)
 #   pagination    part 3 — limit/offset on every list endpoint, unpaged calls unchanged
 #   contract      are the new refusals reported in this service's error envelope?

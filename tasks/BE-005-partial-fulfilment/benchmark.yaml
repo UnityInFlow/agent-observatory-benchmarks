@@ -4,7 +4,10 @@ category: feature
 prompt_file: task.md
 repository: sample-service
 evaluator: evaluator.sh
-evaluator_version: 1.0.0
+# 1.1.0: the amendment clause (task.md part 1, last bullet) and its cases in the fulfilment
+# and contract suites, added after Gate B on the first ticket failed 2 of 5 — see the lab's
+# evidence/gate-b-decision-11/RESULT.md. Runs evaluated under 1.0.0 did not see the clause.
+evaluator_version: 1.1.0
 # Why this benchmark exists: BE-004 is six files that the pinned model passes every time —
 # 54 of 54 runs across three Track B stops exited 0 — and at file granularity it has almost
 # no design variance. Author decision 11 registers a multi-agent decomposition step (B8a)
@@ -21,6 +24,10 @@ evaluator_version: 1.0.0
 #           releases its quantity and the status moves back DOWN — is free under a DERIVED
 #           read model and is the one write site a stored shape has to get right in the
 #           direction no other site exercises. The functional suite executes on it.
+#           A second late clause, added after the first Gate B: the order's QUANTITY can be
+#           amended, which changes fulfilment with no shipment event. A stored copy kept in
+#           step from the shipment side, and a placeholder field a read path trusts, both
+#           answer with the old status; the suite executes on that too.
 #   part 2  an order needs its customer — an UPDATE to existing behaviour that breaks the
 #           baseline OrderControllerTest, which the ticket tells the agent to change and
 #           AC2 exempts by name (baseline_tests_expected_to_change).
@@ -47,7 +54,7 @@ acceptance_criteria:
     description: Existing tests pass, other than OrderControllerTest, which the ticket changes
     check: maven_test
   - id: AC3
-    description: Quantities, allocation, transitions, the fulfilment read model, the filter, and the release of a cancelled shipment's quantity
+    description: Quantities, allocation, transitions, the fulfilment read model, the filter, the release of a cancelled shipment's quantity, and the amendment of an order's quantity
     check: functional_suite
   - id: AC4
     description: Error responses use the service's ApiError envelope

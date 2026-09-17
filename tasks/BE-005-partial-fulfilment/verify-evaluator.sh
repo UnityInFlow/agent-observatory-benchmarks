@@ -7,6 +7,9 @@
 #
 #   baseline-untouched      agent did nothing                                    -> 12 functional
 #   stale-status            stored fulfilment, no release at cancel              -> 12 functional
+#   stale-amend             stored fulfilment, right at all three shipment sites,
+#                           stale after a quantity amendment                    -> 12 functional
+#   placeholder-filter      derived reads, but the list filter trusts a placeholder -> 12 functional
 #   save-then-check         allocation checked after the shipment is saved       -> 12 functional
 #   no-customer-rule        parts 1 and 3 done, part 2 skipped                   -> 12 functional
 #   envelope-breaks-list    pagination as a JSON envelope; unpaged callers break -> 11 existing tests
@@ -20,6 +23,15 @@
 # envelope is correct and its state is wrong. It passes every case up to the late clause.
 # If it ever returns 0 the fulfilment suite has stopped reading state after a cancel, and
 # the benchmark is back to being a smoke test.
+#
+# stale-amend and placeholder-filter were added after Gate B on the first ticket (lab
+# evidence/gate-b-decision-11): two of five plain runs stored fulfilment and wrote it from the
+# shipment side at all three sites — the good-stored-consistent shape — and two derived it but
+# let the list filter read a placeholder field nothing updates. The amendment clause is the
+# late clause that punishes both: it changes fulfilment with no shipment event. stale-amend
+# must fail as 12 and not 13, exactly like stale-status; placeholder-filter dies on the filter
+# case whether or not the amendment exists. If either ever returns 0, the fulfilment suite has
+# stopped reading fulfilment after a change the shipment side did not make.
 #
 # envelope-breaks-list is the epic's second lesson: an UPDATE to existing behaviour that
 # the ticket did not ask for breaks callers that already exist, and AC2 — the baseline
@@ -53,7 +65,7 @@ GOOD_OVERLAY="$BENCHMARK_DIR/fixtures/known-good"
 # dimension and must still exit 0 — that is the property the whole rubric population rests
 # on. The lab's scorers read this line to decide which fixtures they may score.
 QUALITY_VARIANTS=(good-inline-envelope good-nested-ifs good-noisy-diff good-strong-tests good-weak-tests good-stored-consistent)
-KNOWN_BAD=(known-bad-stale-status known-bad-save-then-check known-bad-no-customer-rule known-bad-envelope-breaks-list known-bad-default-error)
+KNOWN_BAD=(known-bad-stale-status known-bad-stale-amend known-bad-placeholder-filter known-bad-save-then-check known-bad-no-customer-rule known-bad-envelope-breaks-list known-bad-default-error)
 APP_KT="$WORK/sample-service/src/main/kotlin/com/unityinflow/sample/SampleServiceApplication.kt"
 POM="$WORK/sample-service/pom.xml"
 
@@ -113,6 +125,8 @@ run_case() {
 
 run_case baseline-untouched   12
 run_case stale-status         12 "apply_known_bad known-bad-stale-status"
+run_case stale-amend          12 "apply_known_bad known-bad-stale-amend"
+run_case placeholder-filter   12 "apply_known_bad known-bad-placeholder-filter"
 run_case save-then-check      12 "apply_known_bad known-bad-save-then-check"
 run_case no-customer-rule     12 "apply_known_bad known-bad-no-customer-rule"
 run_case envelope-breaks-list 11 "apply_known_bad known-bad-envelope-breaks-list"

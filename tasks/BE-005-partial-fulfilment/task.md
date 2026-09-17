@@ -35,6 +35,12 @@ its shipments account for.
 - **Cancelling a shipment releases its quantity.** After the cancel, the order's fulfilment no
   longer counts that shipment, its status moves back accordingly, and a new shipment for the
   released quantity is accepted.
+- **An order's quantity can be amended after shipments exist.** `PUT /orders/{orderId}/quantity`
+  with `{ "quantity": n }` sets it, under the same positive-integer rule (HTTP 400 naming the
+  field); an unknown order is HTTP 404. The amendment is rejected with HTTP 409, and nothing
+  changes, when the new quantity is below the order's allocated quantity. After an amendment the
+  order's fulfilment reflects the new quantity: an order that was `FULLY_ALLOCATED` at 4 is
+  `PARTIALLY_ALLOCATED` at 6, and its shipments then allocate against 6.
 
 ## 2. An order needs its customer
 
@@ -67,7 +73,8 @@ outside its range or a negative `offset` is rejected with HTTP 400 naming the pa
 1. Existing build passes.
 2. Existing tests pass, other than `OrderControllerTest`, which this ticket changes.
 3. Quantities, allocation, the three transitions, the fulfilment read model and the filter
-   behave as specified, including the release of a cancelled shipment's quantity.
+   behave as specified, including the release of a cancelled shipment's quantity and the
+   amendment of an order's quantity.
 4. Error responses are consistent with the rest of this API.
 5. An order for an unknown customer is refused; every list pages as specified and unpaged
    calls are unchanged.

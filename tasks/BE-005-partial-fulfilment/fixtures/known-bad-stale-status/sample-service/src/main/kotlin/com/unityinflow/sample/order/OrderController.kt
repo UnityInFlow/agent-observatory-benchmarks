@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
@@ -71,6 +72,34 @@ class OrderController(
         return repository.findAll()
             .filter { wanted == null || it.fulfilment.status == wanted }
             .page(PageQuery.of(limit, offset))
+    }
+
+    /**
+     * The order's quantity can change after shipments exist. The stored fulfilment is
+     * re-derived against the new quantity here — the fourth write site.
+     */
+    @PutMapping("/{orderId}/quantity")
+    fun amendQuantity(@PathVariable orderId: String, @RequestBody request: AmendQuantityRequest): Order {
+        if (request.quantity < 1) {
+            throw ValidationException(
+                "Order quantity must be positive",
+                listOf(FieldViolation("quantity", "must be at least 1")),
+            )
+        }
+        val order = repository.findById(orderId)
+            ?: throw ResourceNotFoundException(
+                ErrorCode.ORDER_NOT_FOUND,
+                "No order with id '$orderId'",
+            )
+        if (request.quantity < order.fulfilment.allocated) {
+            throw ConflictException(
+                ErrorCode.ORDER_QUANTITY_BELOW_ALLOCATED,
+                "Order '$orderId' has ${order.fulfilment.allocated} allocated; its quantity cannot be reduced to ${request.quantity}",
+            )
+        }
+        return repository.save(
+            order.copy(quantity = request.quantity, fulfilment = order.fulfilment.updated(request.quantity)),
+        )
     }
 
     private fun parseFulfilmentStatus(value: String): FulfilmentStatus =

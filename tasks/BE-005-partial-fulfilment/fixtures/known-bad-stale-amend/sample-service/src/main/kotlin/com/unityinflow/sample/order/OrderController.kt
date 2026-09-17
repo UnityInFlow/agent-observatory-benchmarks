@@ -74,10 +74,7 @@ class OrderController(
             .page(PageQuery.of(limit, offset))
     }
 
-    /**
-     * The order's quantity can change after shipments exist. The stored fulfilment is
-     * re-derived against the new quantity here — the fourth write site.
-     */
+    /** The order's quantity can change after shipments exist. */
     @PutMapping("/{orderId}/quantity")
     fun amendQuantity(@PathVariable orderId: String, @RequestBody request: AmendQuantityRequest): Order {
         if (request.quantity < 1) {
@@ -97,9 +94,7 @@ class OrderController(
                 "Order '$orderId' has ${order.fulfilment.allocated} allocated; its quantity cannot be reduced to ${request.quantity}",
             )
         }
-        return repository.save(
-            order.copy(quantity = request.quantity, fulfilment = order.fulfilment.updated(request.quantity)),
-        )
+        return repository.save(order.copy(quantity = request.quantity))
     }
 
     private fun parseFulfilmentStatus(value: String): FulfilmentStatus =

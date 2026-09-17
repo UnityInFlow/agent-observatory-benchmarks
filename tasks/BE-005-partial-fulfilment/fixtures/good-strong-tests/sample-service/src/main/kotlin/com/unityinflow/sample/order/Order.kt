@@ -25,6 +25,14 @@ data class CreateOrderRequest(
 )
 
 /**
+ * The body of `PUT /orders/{orderId}/quantity`. An absent quantity deserialises to 0 and is
+ * refused the same way a non-positive one is, through the envelope.
+ */
+data class AmendQuantityRequest(
+    val quantity: Int = 0,
+)
+
+/**
  * How much of an order's quantity its shipments account for.
  *
  * Not stored: it is a view over the order's shipments, computed when the order is read,
