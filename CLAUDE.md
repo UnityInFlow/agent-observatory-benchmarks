@@ -89,6 +89,39 @@ Three known-bad fixtures, each overlaid on `known-good` and each an evaluator te
 `good-weak-tests` would pass `known-bad-partial-cascade` unchanged: it never reads state after
 the refusal. That gap is the point of the test-quality pair here.
 
+## BE-005 fixtures
+
+The first task that is an epic: three parts on one branch, four packages, `known-good` is
+**nine files**. Part 1 (partial fulfilment) carries the design fork — fulfilment **derived**
+from the shipments at read time, against a **stored** field written from the shipment side —
+and the late clause that executes on it: a cancelled shipment releases its quantity. Part 2
+(an order needs its customer) is an update to existing behaviour; **AC2 exempts the baseline
+`OrderControllerTest` by name** (`baseline_tests_expected_to_change` in `benchmark.yaml`) and
+reports the exemption in `evaluation.json`. Part 3 (paged lists) is the same contract in
+three controllers with the array body unchanged.
+
+Four evaluator-owned suites: one functional suite per part, sharing exit 12 with the failing
+part named in `evaluation.json`, and one contract suite (exit 13).
+
+Six gate-passing quality variants, each a complete submission differing from `known-good` on
+one dimension: the five from BE-003 and BE-004, plus **`good-stored-consistent`** — the wrong
+shape done right at all three write sites. The evaluator passes it (exit 0) and must; it
+exists so a rubric can be proved able to see the shape when the exit code cannot.
+
+Five known-bad fixtures, each overlaid on `known-good` and each an evaluator test case:
+
+- `known-bad-stale-status` — stored fulfilment written at create and deliver, forgotten at
+  cancel. Passes every case up to the late clause. **Must return 12, never 13.** This is the
+  trap the task exists for.
+- `known-bad-save-then-check` — the refused shipment is stored before the 409 goes out.
+- `known-bad-no-customer-rule` — parts 1 and 3 done, part 2 never attempted.
+- `known-bad-envelope-breaks-list` — pagination as a JSON envelope. The baseline list tests
+  break, so **it returns 11, never 12**: the ordering of AC2 before AC3 is the classification.
+- `known-bad-default-error` — right statuses, framework bodies, in three controllers.
+
+`good-weak-tests` would pass `known-bad-stale-status` unchanged: it cancels and never reads
+fulfilment back.
+
 ## Dependabot must not watch sample-service
 
 The fixture is the thing under test. Its Spring Boot and Kotlin versions are **part of the
