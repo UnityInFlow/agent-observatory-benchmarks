@@ -1,0 +1,39 @@
+# Every evaluator, verifier and hook in this repository is a shell script, and a shell error in
+# an evaluator is a wrong verdict, not a crash. ShellCheck runs over all tracked `*.sh` — every
+# `tasks/*/evaluator.sh`, every `tasks/*/verify-evaluator.sh`, and `.claude/hooks/`.
+#
+# Not path-scoped, unlike the other workflows: it is cheap, and a script anywhere can break.
+name: shellcheck
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shellcheck-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shellcheck:
+    name: shell — ShellCheck finds no errors
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      # Severity is `error`, not `warning`: the one warning found locally on 2026-09-21 (SC2053 in .claude/hooks/opencode-review.sh) sits in a file this step does not edit, and raising the severity is the author's call.
+      - name: ShellCheck the repository
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: .
+          severity: error
+      # Named explicitly so the hidden `.claude/` directory is scanned whatever the action's discovery does with dot-directories.
+      - name: ShellCheck the hooks
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: ./.claude/hooks
+          severity: error
