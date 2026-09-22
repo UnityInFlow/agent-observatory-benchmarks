@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   shellcheck:
-    name: shell — ShellCheck finds no errors
+    name: shell — ShellCheck finds no warnings
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
