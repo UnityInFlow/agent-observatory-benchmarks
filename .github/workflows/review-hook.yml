@@ -34,7 +34,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # fetch-depth: 0 so this checkout carries `origin/main`. The suite's glob-liveness case
+      # resolves REVIEW_GLOBS against the TRUNK tree, never the checkout, and under the default
+      # shallow fetch there is no trunk ref to read — so that case SKIPS, and a skip is not a
+      # pass, so the suite exits non-zero. The ref makes the check RUN.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - name: Syntax-check the hooks
         run: for f in .claude/hooks/*.sh; do bash -n "$f" || exit 1; done
       - name: The review hook behaves
